@@ -1,7 +1,3 @@
-"""
-Ручная реализация метода наименьших квадратов (МНК)
-Без использования statsmodels, только numpy
-"""
 
 import numpy as np
 import pandas as pd
