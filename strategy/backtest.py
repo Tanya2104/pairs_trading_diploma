@@ -45,25 +45,27 @@ class Backtest:
         self.returns = None
         self.cumulative_returns = None
         self.metrics = None
+
+    def _get_base_returns(self) -> pd.Series:
+        """
+        Базовая доходность для пары.
+        Приоритет: готовые доходности пары (r_y - beta * r_x), переданные из pipeline.
+        Fallback: нормированное изменение спреда.
+        """
+        if self.pair_returns is not None:
+            return self.pair_returns.reindex(self.signals.index).fillna(0.0)
+
+        spread_diff = self.spread.diff().fillna(0.0)
+        spread_scale = self.spread.rolling(window=20, min_periods=5).std().bfill()
+        spread_scale = spread_scale.replace(0, np.nan).fillna(1.0)
+        return spread_diff / spread_scale
     
     def run(self) -> Dict:
         """
         Р—Р°РїСѓСЃРє Р±СЌРєС‚РµСЃС‚Р°
         """
-        # Доходность считаем по рыночно-нейтральному портфелю пары:
-        # position[t-1] * (r_Y[t] - beta * r_X[t]), если она передана из pipeline.
-        # Это корректная "процентная" доходность для геометрического накопления капитала.
         position = self.signals['position'].shift(1).fillna(0)
-        if self.pair_returns is not None:
-            base_returns = self.pair_returns.reindex(self.signals.index).fillna(0)
-        else:
-            # Fallback (если доходность пары не была передана): используем изменение спреда,
-            # нормированное на rolling std, чтобы получить сопоставимый scale.
-            spread_diff = self.spread.diff().fillna(0)
-            spread_scale = self.spread.rolling(window=20, min_periods=5).std().bfill()
-            spread_scale = spread_scale.replace(0, np.nan).fillna(1.0)
-            base_returns = spread_diff / spread_scale
-
+        base_returns = self._get_base_returns()
         self.returns = position * base_returns * self.volatility_scale
 
         # Ограничиваем экстремальные значения (для устойчивости метрик)
