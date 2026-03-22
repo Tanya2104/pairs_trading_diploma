@@ -14,6 +14,18 @@ from strategy.backtest import Backtest
 from strategy.signals import PairsTradingStrategy
 
 
+def _build_pair_returns(prices: pd.DataFrame, best_pair: Dict) -> pd.Series:
+    """Собирает доходность рыночно-нейтрального портфеля пары: r_y - beta * r_x."""
+    ticker_x, ticker_y = best_pair["pair"]
+    beta = best_pair["beta"]
+
+    if ticker_x not in prices.columns or ticker_y not in prices.columns:
+        raise KeyError(f"Tickers {ticker_x}/{ticker_y} are missing in prices DataFrame.")
+
+    pair_returns = prices[ticker_y].pct_change() - beta * prices[ticker_x].pct_change()
+    return pair_returns.reindex(prices.index).fillna(0.0)
+
+
 def load_and_prepare_data(
     tickers: list[str],
     start_date: str,
@@ -61,9 +73,7 @@ def run_full_pipeline(
     signals = strategy.generate_signals(max_holding_days=max_holding_days)
     trades = strategy.get_trades()
 
-    ticker_x, ticker_y = best_pair["pair"]
-    beta = best_pair["beta"]
-    pair_returns = prices[ticker_y].pct_change() - beta * prices[ticker_x].pct_change()
+    pair_returns = _build_pair_returns(prices=prices, best_pair=best_pair)
 
     backtest = Backtest(
         signals=signals,
