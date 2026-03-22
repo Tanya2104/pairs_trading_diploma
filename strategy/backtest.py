@@ -17,8 +17,14 @@ class Backtest:
     РњРѕРґРµР»РёСЂРѕРІР°РЅРёРµ С‚РѕСЂРіРѕРІРѕР№ СЃС‚СЂР°С‚РµРіРёРё
     """
     
-    def __init__(self, signals: pd.DataFrame, spread: pd.Series, 
-                 initial_capital: float = 1.0, volatility_scale: float = 1.0):
+    def __init__(
+        self,
+        signals: pd.DataFrame,
+        spread: pd.Series,
+        pair_returns: pd.Series | None = None,
+        initial_capital: float = 1.0,
+        volatility_scale: float = 1.0,
+    ):
         """
         Parameters
         ----------
@@ -33,16 +39,41 @@ class Backtest:
         """
         self.signals = signals
         self.spread = spread
+        self.pair_returns = pair_returns
         self.initial_capital = initial_capital
         self.volatility_scale = volatility_scale
         self.returns = None
         self.cumulative_returns = None
         self.metrics = None
+
+    def _get_base_returns(self) -> pd.Series:
+        """
+        Базовая доходность для пары.
+        Приоритет: готовые доходности пары (r_y - beta * r_x), переданные из pipeline.
+        Fallback: нормированное изменение спреда.
+        """
+        if self.pair_returns is not None:
+            return self.pair_returns.reindex(self.signals.index).fillna(0.0)
+
+        spread_diff = self.spread.diff().fillna(0.0)
+        spread_scale = self.spread.rolling(window=20, min_periods=5).std().bfill()
+        spread_scale = spread_scale.replace(0, np.nan).fillna(1.0)
+        return spread_diff / spread_scale
     
     def run(self) -> Dict:
         """
         Р—Р°РїСѓСЃРє Р±СЌРєС‚РµСЃС‚Р°
         """
+        position = self.signals['position'].shift(1).fillna(0)
+        base_returns = self._get_base_returns()
+        self.returns = position * base_returns * self.volatility_scale
+
+        # Ограничиваем экстремальные значения (для устойчивости метрик)
+        self.returns = np.clip(self.returns, -0.5, 0.5)
+
+        # Геометрическое накопление капитала на процентных доходностях.
+        self.cumulative_returns = self.initial_capital * (1 + self.returns).cumprod()
+
         # Дневной P&L строим на изменении спреда и позиции предыдущего дня.
         # ВАЖНО: это не "процент цены", а P&L в единицах спреда.
         position = self.signals['position'].shift(1).fillna(0)
@@ -90,6 +121,12 @@ class Backtest:
         # РћР±С‰Р°СЏ РґРѕС…РѕРґРЅРѕСЃС‚СЊ
         total_return = self.cumulative_returns.iloc[-1] - 1
         
+        # Годовая доходность (252 торговых дня)
+        n_days = len(self.cumulative_returns)
+        if n_days > 0 and total_return > -1:
+            annual_return = (1 + total_return) ** (252 / n_days) - 1
+        else:
+            annual_return = 0
         # Годовая доходность: для аддитивного P&L используем среднедневной темп.
         annual_return = returns.mean() * 252
         
