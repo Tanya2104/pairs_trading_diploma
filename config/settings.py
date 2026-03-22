@@ -23,7 +23,7 @@ class StrategyConfig:
     """Параметры торговой стратегии"""
     zscore_window: int = 20
     entry_z: float = 2.0
-    exit_z: float = 0.0
+    exit_z: float = 0.5
 
 
 @dataclass
