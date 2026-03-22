@@ -17,8 +17,14 @@ class Backtest:
     РњРѕРґРµР»РёСЂРѕРІР°РЅРёРµ С‚РѕСЂРіРѕРІРѕР№ СЃС‚СЂР°С‚РµРіРёРё
     """
     
-    def __init__(self, signals: pd.DataFrame, spread: pd.Series, 
-                 initial_capital: float = 1.0, volatility_scale: float = 1.0):
+    def __init__(
+        self,
+        signals: pd.DataFrame,
+        spread: pd.Series,
+        pair_returns: pd.Series | None = None,
+        initial_capital: float = 1.0,
+        volatility_scale: float = 1.0,
+    ):
         """
         Parameters
         ----------
@@ -33,6 +39,7 @@ class Backtest:
         """
         self.signals = signals
         self.spread = spread
+        self.pair_returns = pair_returns
         self.initial_capital = initial_capital
         self.volatility_scale = volatility_scale
         self.returns = None
@@ -43,23 +50,27 @@ class Backtest:
         """
         Р—Р°РїСѓСЃРє Р±СЌРєС‚РµСЃС‚Р°
         """
-        # РќРѕСЂРјР°Р»РёР·СѓРµРј СЃРїСЂРµРґ (РїСЂРёРІРѕРґРёРј Рє СЃРѕРїРѕСЃС‚Р°РІРёРјРѕРјСѓ РјР°СЃС€С‚Р°Р±Сѓ)
-        spread_std = self.spread.std()
-        if spread_std == 0 or np.isnan(spread_std):
-            spread_std = 1.0
-        spread_normalized = (self.spread / spread_std) * self.volatility_scale
-        
-        # Р”РѕС…РѕРґРЅРѕСЃС‚СЊ: РёР·РјРµРЅРµРЅРёРµ РЅРѕСЂРјРёСЂРѕРІР°РЅРЅРѕРіРѕ СЃРїСЂРµРґР°, СѓРјРЅРѕР¶РµРЅРЅРѕРµ РЅР° РїРѕР·РёС†РёСЋ
-        spread_returns = spread_normalized.diff().shift(-1)
-        self.returns = self.signals['position'].shift(1) * spread_returns
-        self.returns = self.returns.fillna(0)
-        
-        # РћРіСЂР°РЅРёС‡РёРІР°РµРј СЌРєСЃС‚СЂРµРјР°Р»СЊРЅС‹Рµ Р·РЅР°С‡РµРЅРёСЏ (РґР»СЏ СѓСЃС‚РѕР№С‡РёРІРѕСЃС‚Рё)
+        # Доходность считаем по рыночно-нейтральному портфелю пары:
+        # position[t-1] * (r_Y[t] - beta * r_X[t]), если она передана из pipeline.
+        # Это корректная "процентная" доходность для геометрического накопления капитала.
+        position = self.signals['position'].shift(1).fillna(0)
+        if self.pair_returns is not None:
+            base_returns = self.pair_returns.reindex(self.signals.index).fillna(0)
+        else:
+            # Fallback (если доходность пары не была передана): используем изменение спреда,
+            # нормированное на rolling std, чтобы получить сопоставимый scale.
+            spread_diff = self.spread.diff().fillna(0)
+            spread_scale = self.spread.rolling(window=20, min_periods=5).std().bfill()
+            spread_scale = spread_scale.replace(0, np.nan).fillna(1.0)
+            base_returns = spread_diff / spread_scale
+
+        self.returns = position * base_returns * self.volatility_scale
+
+        # Ограничиваем экстремальные значения (для устойчивости метрик)
         self.returns = np.clip(self.returns, -0.5, 0.5)
-        
-        # РќР°РєРѕРїР»РµРЅРЅР°СЏ РґРѕС…РѕРґРЅРѕСЃС‚СЊ
-        self.cumulative_returns = (1 + self.returns).cumprod()
-        self.cumulative_returns = self.cumulative_returns * self.initial_capital
+
+        # Геометрическое накопление капитала на процентных доходностях.
+        self.cumulative_returns = self.initial_capital * (1 + self.returns).cumprod()
         
         # Р Р°СЃС‡С‘С‚ РјРµС‚СЂРёРє
         self.metrics = self._calculate_metrics()
@@ -87,7 +98,7 @@ class Backtest:
         # РћР±С‰Р°СЏ РґРѕС…РѕРґРЅРѕСЃС‚СЊ
         total_return = self.cumulative_returns.iloc[-1] - 1
         
-        # Р“РѕРґРѕРІР°СЏ РґРѕС…РѕРґРЅРѕСЃС‚СЊ (252 С‚РѕСЂРіРѕРІС‹С… РґРЅСЏ)
+        # Годовая доходность (252 торговых дня)
         n_days = len(self.cumulative_returns)
         if n_days > 0 and total_return > -1:
             annual_return = (1 + total_return) ** (252 / n_days) - 1

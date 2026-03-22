@@ -61,7 +61,16 @@ def run_full_pipeline(
     signals = strategy.generate_signals(max_holding_days=max_holding_days)
     trades = strategy.get_trades()
 
-    backtest = Backtest(signals=signals, spread=best_pair["spread"], initial_capital=1.0)
+    ticker_x, ticker_y = best_pair["pair"]
+    beta = best_pair["beta"]
+    pair_returns = prices[ticker_y].pct_change() - beta * prices[ticker_x].pct_change()
+
+    backtest = Backtest(
+        signals=signals,
+        spread=best_pair["spread"],
+        pair_returns=pair_returns,
+        initial_capital=1.0,
+    )
     bt_result = backtest.run()
 
     return {
