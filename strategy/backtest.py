@@ -73,6 +73,27 @@ class Backtest:
 
         # Геометрическое накопление капитала на процентных доходностях.
         self.cumulative_returns = self.initial_capital * (1 + self.returns).cumprod()
+
+        # Дневной P&L строим на изменении спреда и позиции предыдущего дня.
+        # ВАЖНО: это не "процент цены", а P&L в единицах спреда.
+        position = self.signals['position'].shift(1).fillna(0)
+        spread_diff = self.spread.diff().fillna(0)
+        raw_pnl = position * spread_diff
+
+        # Нормируем P&L на локальную "типичную величину спреда",
+        # чтобы значения были сопоставимы и без экстремальных скачков.
+        spread_scale = (
+            self.spread.abs().rolling(window=20, min_periods=5).mean().bfill()
+        )
+        spread_scale = spread_scale.replace(0, np.nan).fillna(1.0)
+        self.returns = (raw_pnl / spread_scale) * self.volatility_scale
+
+        # Ограничиваем экстремальные значения (для устойчивости метрик)
+        self.returns = np.clip(self.returns, -0.2, 0.2)
+
+        # Капитал считаем аддитивно через накопленный P&L.
+        # Это корректнее для спред-стратегии, чем геометрическое compounding.
+        self.cumulative_returns = self.initial_capital + self.returns.cumsum()
         
         # Р Р°СЃС‡С‘С‚ РјРµС‚СЂРёРє
         self.metrics = self._calculate_metrics()
@@ -106,6 +127,8 @@ class Backtest:
             annual_return = (1 + total_return) ** (252 / n_days) - 1
         else:
             annual_return = 0
+        # Годовая доходность: для аддитивного P&L используем среднедневной темп.
+        annual_return = returns.mean() * 252
         
         # Sharpe ratio (РіРѕРґРѕРІРѕР№)
         mean_return = returns.mean() * 252
@@ -119,6 +142,7 @@ class Backtest:
         max_drawdown = drawdown.min()
         if np.isinf(max_drawdown) or np.isnan(max_drawdown):
             max_drawdown = 0
+        max_drawdown = max(max_drawdown, -1.0)
         
         # Win rate РїРѕ РґРЅСЏРј
         win_days = (returns > 0).sum()
