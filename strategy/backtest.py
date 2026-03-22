@@ -1,6 +1,6 @@
-﻿"""
-Бэктестирование торговой стратегии
-Расчёт метрик эффективности
+"""
+Р‘СЌРєС‚РµСЃС‚РёСЂРѕРІР°РЅРёРµ С‚РѕСЂРіРѕРІРѕР№ СЃС‚СЂР°С‚РµРіРёРё
+Р Р°СЃС‡С‘С‚ РјРµС‚СЂРёРє СЌС„С„РµРєС‚РёРІРЅРѕСЃС‚Рё
 """
 
 import sys
@@ -14,7 +14,7 @@ from typing import Dict
 
 class Backtest:
     """
-    Моделирование торговой стратегии
+    РњРѕРґРµР»РёСЂРѕРІР°РЅРёРµ С‚РѕСЂРіРѕРІРѕР№ СЃС‚СЂР°С‚РµРіРёРё
     """
     
     def __init__(self, signals: pd.DataFrame, spread: pd.Series, 
@@ -23,13 +23,13 @@ class Backtest:
         Parameters
         ----------
         signals : pd.DataFrame
-            DataFrame с колонкой 'position'
+            DataFrame СЃ РєРѕР»РѕРЅРєРѕР№ 'position'
         spread : pd.Series
-            Временной ряд спреда
+            Р’СЂРµРјРµРЅРЅРѕР№ СЂСЏРґ СЃРїСЂРµРґР°
         initial_capital : float
-            Начальный капитал (в относительных единицах)
+            РќР°С‡Р°Р»СЊРЅС‹Р№ РєР°РїРёС‚Р°Р» (РІ РѕС‚РЅРѕСЃРёС‚РµР»СЊРЅС‹С… РµРґРёРЅРёС†Р°С…)
         volatility_scale : float
-            Масштабирующий коэффициент для приведения спреда к сопоставимому масштабу
+            РњР°СЃС€С‚Р°Р±РёСЂСѓСЋС‰РёР№ РєРѕСЌС„С„РёС†РёРµРЅС‚ РґР»СЏ РїСЂРёРІРµРґРµРЅРёСЏ СЃРїСЂРµРґР° Рє СЃРѕРїРѕСЃС‚Р°РІРёРјРѕРјСѓ РјР°СЃС€С‚Р°Р±Сѓ
         """
         self.signals = signals
         self.spread = spread
@@ -41,24 +41,27 @@ class Backtest:
     
     def run(self) -> Dict:
         """
-        Запуск бэктеста
+        Р—Р°РїСѓСЃРє Р±СЌРєС‚РµСЃС‚Р°
         """
-        # Нормализуем спред (приводим к сопоставимому масштабу)
-        spread_normalized = self.spread / self.spread.std()
+        # РќРѕСЂРјР°Р»РёР·СѓРµРј СЃРїСЂРµРґ (РїСЂРёРІРѕРґРёРј Рє СЃРѕРїРѕСЃС‚Р°РІРёРјРѕРјСѓ РјР°СЃС€С‚Р°Р±Сѓ)
+        spread_std = self.spread.std()
+        if spread_std == 0 or np.isnan(spread_std):
+            spread_std = 1.0
+        spread_normalized = (self.spread / spread_std) * self.volatility_scale
         
-        # Доходность: изменение нормированного спреда, умноженное на позицию
+        # Р”РѕС…РѕРґРЅРѕСЃС‚СЊ: РёР·РјРµРЅРµРЅРёРµ РЅРѕСЂРјРёСЂРѕРІР°РЅРЅРѕРіРѕ СЃРїСЂРµРґР°, СѓРјРЅРѕР¶РµРЅРЅРѕРµ РЅР° РїРѕР·РёС†РёСЋ
         spread_returns = spread_normalized.diff().shift(-1)
         self.returns = self.signals['position'].shift(1) * spread_returns
         self.returns = self.returns.fillna(0)
         
-        # Ограничиваем экстремальные значения (для устойчивости)
+        # РћРіСЂР°РЅРёС‡РёРІР°РµРј СЌРєСЃС‚СЂРµРјР°Р»СЊРЅС‹Рµ Р·РЅР°С‡РµРЅРёСЏ (РґР»СЏ СѓСЃС‚РѕР№С‡РёРІРѕСЃС‚Рё)
         self.returns = np.clip(self.returns, -0.5, 0.5)
         
-        # Накопленная доходность
+        # РќР°РєРѕРїР»РµРЅРЅР°СЏ РґРѕС…РѕРґРЅРѕСЃС‚СЊ
         self.cumulative_returns = (1 + self.returns).cumprod()
         self.cumulative_returns = self.cumulative_returns * self.initial_capital
         
-        # Расчёт метрик
+        # Р Р°СЃС‡С‘С‚ РјРµС‚СЂРёРє
         self.metrics = self._calculate_metrics()
         
         return {
@@ -68,7 +71,7 @@ class Backtest:
         }
     
     def _calculate_metrics(self) -> Dict:
-        """Расчёт метрик эффективности"""
+        """Р Р°СЃС‡С‘С‚ РјРµС‚СЂРёРє СЌС„С„РµРєС‚РёРІРЅРѕСЃС‚Рё"""
         returns = self.returns.dropna()
         
         if len(returns) == 0 or np.isinf(self.cumulative_returns.iloc[-1]):
@@ -81,35 +84,35 @@ class Backtest:
                 'num_trades': 0
             }
         
-        # Общая доходность
+        # РћР±С‰Р°СЏ РґРѕС…РѕРґРЅРѕСЃС‚СЊ
         total_return = self.cumulative_returns.iloc[-1] - 1
         
-        # Годовая доходность (252 торговых дня)
+        # Р“РѕРґРѕРІР°СЏ РґРѕС…РѕРґРЅРѕСЃС‚СЊ (252 С‚РѕСЂРіРѕРІС‹С… РґРЅСЏ)
         n_days = len(self.cumulative_returns)
         if n_days > 0 and total_return > -1:
             annual_return = (1 + total_return) ** (252 / n_days) - 1
         else:
             annual_return = 0
         
-        # Sharpe ratio (годовой)
+        # Sharpe ratio (РіРѕРґРѕРІРѕР№)
         mean_return = returns.mean() * 252
         std_return = returns.std() * np.sqrt(252)
         sharpe = mean_return / std_return if std_return != 0 and std_return < 100 else 0
-        sharpe = np.clip(sharpe, -10, 10)  # ограничиваем
+        sharpe = np.clip(sharpe, -10, 10)  # РѕРіСЂР°РЅРёС‡РёРІР°РµРј
         
-        # Максимальная просадка
+        # РњР°РєСЃРёРјР°Р»СЊРЅР°СЏ РїСЂРѕСЃР°РґРєР°
         peak = self.cumulative_returns.expanding().max()
         drawdown = (self.cumulative_returns - peak) / peak
         max_drawdown = drawdown.min()
         if np.isinf(max_drawdown) or np.isnan(max_drawdown):
             max_drawdown = 0
         
-        # Win rate по дням
+        # Win rate РїРѕ РґРЅСЏРј
         win_days = (returns > 0).sum()
         loss_days = (returns < 0).sum()
         win_rate = win_days / (win_days + loss_days) if (win_days + loss_days) > 0 else 0
         
-        # Количество сделок (смена позиции)
+        # РљРѕР»РёС‡РµСЃС‚РІРѕ СЃРґРµР»РѕРє (СЃРјРµРЅР° РїРѕР·РёС†РёРё)
         position_changes = self.signals['position'].diff()
         trades = position_changes[position_changes != 0]
         num_trades = len(trades) // 2
@@ -124,37 +127,37 @@ class Backtest:
         }
     
     def get_summary(self) -> str:
-        """Возвращает текстовую сводку результатов"""
+        """Р’РѕР·РІСЂР°С‰Р°РµС‚ С‚РµРєСЃС‚РѕРІСѓСЋ СЃРІРѕРґРєСѓ СЂРµР·СѓР»СЊС‚Р°С‚РѕРІ"""
         if self.metrics is None:
             self.run()
         
         if np.isinf(self.cumulative_returns.iloc[-1]):
             return """
-            ⚠️ Ошибка: переполнение в расчётах
-            Попробуйте изменить параметры стратегии или масштабирование
+            вљ пёЏ РћС€РёР±РєР°: РїРµСЂРµРїРѕР»РЅРµРЅРёРµ РІ СЂР°СЃС‡С‘С‚Р°С…
+            РџРѕРїСЂРѕР±СѓР№С‚Рµ РёР·РјРµРЅРёС‚СЊ РїР°СЂР°РјРµС‚СЂС‹ СЃС‚СЂР°С‚РµРіРёРё РёР»Рё РјР°СЃС€С‚Р°Р±РёСЂРѕРІР°РЅРёРµ
             """
         
         return f"""
-        📊 Результаты бэктеста
+        рџ“Љ Р РµР·СѓР»СЊС‚Р°С‚С‹ Р±СЌРєС‚РµСЃС‚Р°
         {'='*50}
-        Начальный капитал: {self.initial_capital}
-        Конечный капитал: {self.cumulative_returns.iloc[-1]:.4f}
+        РќР°С‡Р°Р»СЊРЅС‹Р№ РєР°РїРёС‚Р°Р»: {self.initial_capital}
+        РљРѕРЅРµС‡РЅС‹Р№ РєР°РїРёС‚Р°Р»: {self.cumulative_returns.iloc[-1]:.4f}
         
-        Доходность:
-          Общая: {self.metrics['total_return']:.2%}
-          Годовая: {self.metrics['annual_return']:.2%}
+        Р”РѕС…РѕРґРЅРѕСЃС‚СЊ:
+          РћР±С‰Р°СЏ: {self.metrics['total_return']:.2%}
+          Р“РѕРґРѕРІР°СЏ: {self.metrics['annual_return']:.2%}
         
-        Риск:
+        Р РёСЃРє:
           Sharpe ratio: {self.metrics['sharpe_ratio']:.2f}
-          Макс. просадка: {self.metrics['max_drawdown']:.2%}
+          РњР°РєСЃ. РїСЂРѕСЃР°РґРєР°: {self.metrics['max_drawdown']:.2%}
         
-        Статистика:
-          Доля прибыльных дней: {self.metrics['win_rate']:.2%}
-          Оценка числа сделок: {self.metrics['num_trades']}
+        РЎС‚Р°С‚РёСЃС‚РёРєР°:
+          Р”РѕР»СЏ РїСЂРёР±С‹Р»СЊРЅС‹С… РґРЅРµР№: {self.metrics['win_rate']:.2%}
+          РћС†РµРЅРєР° С‡РёСЃР»Р° СЃРґРµР»РѕРє: {self.metrics['num_trades']}
         """
 
 
-# ============= ТЕСТ =============
+# ============= РўР•РЎРў =============
 if __name__ == "__main__":
     from core.data_loader import MOEXLoader
     from core.cointegration import CointegrationTester
@@ -162,10 +165,10 @@ if __name__ == "__main__":
     from config import data_config
     
     print("=" * 60)
-    print("Бэктестирование")
+    print("Р‘СЌРєС‚РµСЃС‚РёСЂРѕРІР°РЅРёРµ")
     print("=" * 60)
     
-    # Загружаем данные
+    # Р—Р°РіСЂСѓР¶Р°РµРј РґР°РЅРЅС‹Рµ
     loader = MOEXLoader(use_cache=True)
     prices = loader.load_prices(
         tickers=data_config.tickers[:8],
@@ -173,15 +176,15 @@ if __name__ == "__main__":
         end_date="2023-12-31"
     )
     
-    # Находим коинтегрированные пары
+    # РќР°С…РѕРґРёРј РєРѕРёРЅС‚РµРіСЂРёСЂРѕРІР°РЅРЅС‹Рµ РїР°СЂС‹
     tester = CointegrationTester(prices, p_value_threshold=0.05)
     results = tester.find_pairs()
     best = tester.get_best_pair()
     
     if best:
-        print(f"\nЛучшая пара: {best['pair'][0]} - {best['pair'][1]}")
+        print(f"\nР›СѓС‡С€Р°СЏ РїР°СЂР°: {best['pair'][0]} - {best['pair'][1]}")
         
-        # Генерируем сигналы
+        # Р“РµРЅРµСЂРёСЂСѓРµРј СЃРёРіРЅР°Р»С‹
         strategy = PairsTradingStrategy(
             spread=best['spread'],
             window=20,
@@ -190,21 +193,21 @@ if __name__ == "__main__":
         )
         signals = strategy.generate_signals(max_holding_days=15)
         
-        # Бэктест
+        # Р‘СЌРєС‚РµСЃС‚
         backtest = Backtest(signals, best['spread'], initial_capital=1.0)
         results_bt = backtest.run()
         
         print(backtest.get_summary())
         
-        # Показываем статистику
-        print("\nСтатистика доходностей:")
+        # РџРѕРєР°Р·С‹РІР°РµРј СЃС‚Р°С‚РёСЃС‚РёРєСѓ
+        print("\nРЎС‚Р°С‚РёСЃС‚РёРєР° РґРѕС…РѕРґРЅРѕСЃС‚РµР№:")
         returns = results_bt['returns'].dropna()
-        print(f"  Средняя: {returns.mean():.6f}")
+        print(f"  РЎСЂРµРґРЅСЏСЏ: {returns.mean():.6f}")
         print(f"  Std: {returns.std():.6f}")
         print(f"  Min: {returns.min():.6f}")
         print(f"  Max: {returns.max():.6f}")
         
-        print("\nПоследние 10 дней капитала:")
+        print("\nРџРѕСЃР»РµРґРЅРёРµ 10 РґРЅРµР№ РєР°РїРёС‚Р°Р»Р°:")
         print(results_bt['cumulative_returns'].tail(10))
     else:
-        print("Коинтегрированные пары не найдены")
+        print("РљРѕРёРЅС‚РµРіСЂРёСЂРѕРІР°РЅРЅС‹Рµ РїР°СЂС‹ РЅРµ РЅР°Р№РґРµРЅС‹")
