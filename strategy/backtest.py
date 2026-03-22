@@ -17,22 +17,17 @@ class Backtest:
     РњРѕРґРµР»РёСЂРѕРІР°РЅРёРµ С‚РѕСЂРіРѕРІРѕР№ СЃС‚СЂР°С‚РµРіРёРё
     """
     
-    def __init__(self, signals: pd.DataFrame, spread: pd.Series, 
-                 initial_capital: float = 1.0, volatility_scale: float = 1.0):
-        """
-        Parameters
-        ----------
-        signals : pd.DataFrame
-            DataFrame СЃ РєРѕР»РѕРЅРєРѕР№ 'position'
-        spread : pd.Series
-            Р’СЂРµРјРµРЅРЅРѕР№ СЂСЏРґ СЃРїСЂРµРґР°
-        initial_capital : float
-            РќР°С‡Р°Р»СЊРЅС‹Р№ РєР°РїРёС‚Р°Р» (РІ РѕС‚РЅРѕСЃРёС‚РµР»СЊРЅС‹С… РµРґРёРЅРёС†Р°С…)
-        volatility_scale : float
-            РњР°СЃС€С‚Р°Р±РёСЂСѓСЋС‰РёР№ РєРѕСЌС„С„РёС†РёРµРЅС‚ РґР»СЏ РїСЂРёРІРµРґРµРЅРёСЏ СЃРїСЂРµРґР° Рє СЃРѕРїРѕСЃС‚Р°РІРёРјРѕРјСѓ РјР°СЃС€С‚Р°Р±Сѓ
-        """
+    def __init__(
+        self,
+        signals: pd.DataFrame,
+        spread: pd.Series,
+        pair_returns: pd.Series | None = None,
+        initial_capital: float = 1.0,
+        volatility_scale: float = 1.0,
+    ):
         self.signals = signals
         self.spread = spread
+        self.pair_returns = pair_returns
         self.initial_capital = initial_capital
         self.volatility_scale = volatility_scale
         self.returns = None
@@ -43,19 +38,21 @@ class Backtest:
         """
         Р—Р°РїСѓСЃРє Р±СЌРєС‚РµСЃС‚Р°
         """
-        # Дневной P&L строим на изменении спреда и позиции предыдущего дня.
-        # ВАЖНО: это не "процент цены", а P&L в единицах спреда.
+         # Доходность считаем по рыночно-нейтральному портфелю пары:
+        # position[t-1] * (r_Y[t] - beta * r_X[t]), если она передана из pipeline.
+        # Это корректная "процентная" доходность для геометрического накопления капитала.
         position = self.signals['position'].shift(1).fillna(0)
-        spread_diff = self.spread.diff().fillna(0)
-        raw_pnl = position * spread_diff
+        if self.pair_returns is not None:
+            base_returns = self.pair_returns.reindex(self.signals.index).fillna(0)
+        else:
+            # Fallback (если доходность пары не была передана): используем изменение спреда,
+            # нормированное на rolling std, чтобы получить сопоставимый scale.
+            spread_diff = self.spread.diff().fillna(0)
+            spread_scale = self.spread.rolling(window=20, min_periods=5).std().bfill()
+            spread_scale = spread_scale.replace(0, np.nan).fillna(1.0)
+            base_returns = spread_diff / spread_scale
 
-        # Нормируем P&L на локальную "типичную величину спреда",
-        # чтобы значения были сопоставимы и без экстремальных скачков.
-        spread_scale = (
-            self.spread.abs().rolling(window=20, min_periods=5).mean().bfill()
-        )
-        spread_scale = spread_scale.replace(0, np.nan).fillna(1.0)
-        self.returns = (raw_pnl / spread_scale) * self.volatility_scale
+        self.returns = position * base_returns * self.volatility_scale
 
         # Ограничиваем экстремальные значения (для устойчивости метрик)
         self.returns = np.clip(self.returns, -0.2, 0.2)
