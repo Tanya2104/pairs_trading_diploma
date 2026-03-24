@@ -220,10 +220,11 @@ def main() -> None:
 
     st.subheader("Интерпретация бэктеста (расширенная)")
     d1, d2, d3, d4 = st.columns(4)
-    d1.metric("Дневная волатильность", f"{details['volatility_daily']:.2%}")
-    d2.metric("Лучший день", f"{details['best_day']:.2%}")
-    d3.metric("Худший день", f"{details['worst_day']:.2%}")
+    d1.metric("Дневная волатильность доходности", f"{details['volatility_daily']:.2%}")
+    d2.metric("Лучший день (доходность)", f"{details['best_day']:.2%}")
+    d3.metric("Худший день (доходность)", f"{details['worst_day']:.2%}")
     d4.metric("Доля прибыльных сделок", f"{details['trade_win_rate']:.2%}")
+    st.caption("Здесь проценты относятся к дневной доходности стратегии, а не к длительности в днях.")
     st.markdown(
         f"- Среднее удержание: **{details['avg_holding_days']:.1f} дня**  \n"
         f"- Медианное удержание: **{details['median_holding_days']:.1f} дня**  \n"
