@@ -21,9 +21,19 @@ from core.regression import LinearRegression
 class CointegrationTester:
     """Find and rank potentially cointegrated ticker pairs."""
 
-    def __init__(self, prices: pd.DataFrame, p_value_threshold: float = 0.05):
+    def __init__(
+        self,
+        prices: pd.DataFrame,
+        p_value_threshold: float = 0.05,
+        min_r_squared: float = 0.6,
+        min_half_life: float = 2.0,
+        max_half_life: float = 120.0,
+    ):
         self.prices = prices
         self.threshold = p_value_threshold
+        self.min_r_squared = min_r_squared
+        self.min_half_life = min_half_life
+        self.max_half_life = max_half_life
         self.results: List[Dict] = []
         self.correlation_analyzer = CorrelationAnalyzer(prices)
         self.adf_tester = ADFTest(max_lags=10, autolag="AIC")
@@ -56,8 +66,10 @@ class CointegrationTester:
         if len(df_pair) < 30:
             return None
 
-        X = df_pair.iloc[:, 0]
-        Y = df_pair.iloc[:, 1]
+        # Оцениваем коинтеграцию на лог-ценах: это стабилизирует масштаб
+        # и даёт более интерпретируемый hedge-ratio для пар с разными уровнями цен.
+        X = np.log(df_pair.iloc[:, 0])
+        Y = np.log(df_pair.iloc[:, 1])
 
         model = LinearRegression()
         model.fit(X, Y)
@@ -102,10 +114,37 @@ class CointegrationTester:
         self.results.sort(key=lambda x: x["p_value"])
         return self.results
 
+    def _is_tradable_pair(self, result: Dict) -> bool:
+        """Фильтр пар, пригодных для торговли, а не только статистически стационарных."""
+        if not result["is_cointegrated"]:
+            return False
+
+        beta = result["beta"]
+        half_life = result["half_life"]
+        r_squared = result["r_squared"]
+
+        if beta <= 0:
+            return False
+        if not np.isfinite(half_life):
+            return False
+        if not (self.min_half_life <= half_life <= self.max_half_life):
+            return False
+        if r_squared < self.min_r_squared:
+            return False
+
+        return True
+
     def get_best_pair(self) -> Optional[Dict]:
         if not self.results:
             self.find_pairs()
 
+        tradable = [r for r in self.results if self._is_tradable_pair(r)]
+        if tradable:
+            tradable.sort(key=lambda x: (x["p_value"], -x["r_squared"], x["half_life"]))
+            return tradable[0]
+
+        # Fallback: если фильтр слишком строгий для текущей выборки,
+        # возвращаем лучшую статистически коинтегрированную пару.
         cointegrated = [r for r in self.results if r["is_cointegrated"]]
         return cointegrated[0] if cointegrated else None
 
