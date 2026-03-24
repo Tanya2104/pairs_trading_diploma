@@ -30,6 +30,24 @@ def build_backtest_diagnosis(metrics: dict) -> tuple[str, str]:
     return "⚠️ Weak / unstable", "Результат нестабилен: проверьте параметры, период, и устойчивость пары out-of-sample."
 
 
+def build_method_comparison_text(coint_metrics: dict, corr_metrics: dict | None, best_method: str) -> str:
+    """Human-readable interpretation for method benchmark section."""
+    if corr_metrics is None:
+        return "Корреляционный бенчмарк недоступен: сравнение выполнено только для коинтеграции."
+
+    c_sharpe = float(coint_metrics.get("sharpe_ratio", 0))
+    r_sharpe = float(corr_metrics.get("sharpe_ratio", 0))
+    c_ret = float(coint_metrics.get("total_return", 0))
+    r_ret = float(corr_metrics.get("total_return", 0))
+
+    winner = "Коинтеграция" if best_method == "cointegration" else "Корреляция"
+    return (
+        f"**Лучший метод: {winner}.** "
+        f"Sharpe: {c_sharpe:.2f} vs {r_sharpe:.2f}; "
+        f"Total Return: {c_ret:.2%} vs {r_ret:.2%}."
+    )
+
+
 def render_spread_chart(spread: pd.Series, zscore: pd.Series) -> go.Figure:
     """Render spread and z-score on two y-axes."""
     fig = go.Figure()
@@ -173,6 +191,9 @@ def main() -> None:
     signals = result["signals"]
     trades = result["trades"]
     metrics = result["metrics"]
+    details = result["details"]
+    corr_bt = result.get("correlation_backtest")
+    comparison_table = pd.DataFrame(result.get("comparison_table", []))
 
     st.subheader("Best cointegrated pair")
     st.markdown(
@@ -196,6 +217,44 @@ def main() -> None:
     st.markdown(f"**Profitable days share:** {metrics['win_rate']:.2%}")
     quality_title, quality_comment = build_backtest_diagnosis(metrics)
     st.info(f"**Backtest quality:** {quality_title}\n\n{quality_comment}")
+
+    st.subheader("Backtest interpretation (extended)")
+    d1, d2, d3, d4 = st.columns(4)
+    d1.metric("Daily Volatility", f"{details['volatility_daily']:.2%}")
+    d2.metric("Best Day", f"{details['best_day']:.2%}")
+    d3.metric("Worst Day", f"{details['worst_day']:.2%}")
+    d4.metric("Trade Win Rate", f"{details['trade_win_rate']:.2%}")
+    st.markdown(
+        f"- Avg holding: **{details['avg_holding_days']:.1f} days**  \n"
+        f"- Median holding: **{details['median_holding_days']:.1f} days**  \n"
+        f"- Avg trade P&L (spread units): **{details['avg_trade_pnl']:.4f}**"
+    )
+
+    st.subheader("Method comparison: Cointegration vs Correlation")
+    if corr_bt is None:
+        st.warning("Correlation benchmark is not available for selected settings.")
+    else:
+        coint_metrics = metrics
+        corr_metrics = corr_bt["metrics"]
+        mc1, mc2, mc3, mc4 = st.columns(4)
+        mc1.metric("Coint Sharpe", f"{coint_metrics['sharpe_ratio']:.2f}")
+        mc2.metric("Corr Sharpe", f"{corr_metrics['sharpe_ratio']:.2f}")
+        mc3.metric("Coint Return", f"{coint_metrics['total_return']:.2%}")
+        mc4.metric("Corr Return", f"{corr_metrics['total_return']:.2%}")
+        st.info(build_method_comparison_text(coint_metrics, corr_metrics, result["best_method"]))
+        st.caption(result["comparison_reason"])
+
+        corr_pair = corr_bt["pair"]
+        st.markdown(
+            f"Корреляционный эталон: **{corr_pair['pair'][0]} - {corr_pair['pair'][1]}**, "
+            f"corr=`{corr_pair['correlation']:.4f}`, beta=`{corr_pair['beta']:.4f}`"
+        )
+
+    st.subheader("Correlation vs Cointegration matrix")
+    if comparison_table.empty:
+        st.info("Comparison matrix is empty.")
+    else:
+        st.dataframe(comparison_table.head(25), use_container_width=True)
 
     st.subheader("Trades")
     if trades.empty:
