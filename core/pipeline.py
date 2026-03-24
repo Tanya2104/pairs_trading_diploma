@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-"""РџР°Р№РїР»Р°Р№РЅ Р·Р°РіСЂСѓР·РєРё, РѕС‚Р±РѕСЂР° РїР°СЂС‹ Рё Р±СЌРєС‚РµСЃС‚Р° (Р±РµР· Р·Р°РІРёСЃРёРјРѕСЃС‚Рё РѕС‚ Streamlit)."""
 
 from __future__ import annotations
 
@@ -33,7 +31,7 @@ def load_and_prepare_data(
     missing_threshold: float,
     use_cache: bool,
 )   tuple[pd.DataFrame, Dict]:
-    """Р—Р°РіСЂСѓР¶Р°РµС‚ РґР°РЅРЅС‹Рµ MOEX Рё РІС‹РїРѕР»РЅСЏРµС‚ Р±Р°Р·РѕРІСѓСЋ РѕС‡РёСЃС‚РєСѓ/СЃРёРЅС…СЂРѕРЅРёР·Р°С†РёСЋ."""
+
     loader = MOEXLoader(use_cache=use_cache)
     raw_prices = loader.load_prices(tickers=tickers, start_date=start_date, end_date=end_date)
 
