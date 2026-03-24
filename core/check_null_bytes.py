@@ -1,12 +1,9 @@
-"""РџСЂРѕРІРµСЂРєР° РёСЃС…РѕРґРЅРёРєРѕРІ Python РЅР° РЅР°Р»РёС‡РёРµ null-Р±Р°Р№С‚РѕРІ (\x00)."""
-
 from __future__ import annotations
 
 from pathlib import Path
 
 
 def main() -> None:
-    """РџРµС‡Р°С‚Р°РµС‚ СЃРїРёСЃРѕРє .py С„Р°Р№Р»РѕРІ СЃ null-Р±Р°Р№С‚Р°РјРё Рё Р·Р°РІРµСЂС€Р°РµС‚ СЃ РєРѕРґРѕРј 1, РµСЃР»Рё РѕРЅРё РµСЃС‚СЊ."""
     bad_files = []
     for path in Path('.').rglob('*.py'):
         if '.venv' in path.parts:

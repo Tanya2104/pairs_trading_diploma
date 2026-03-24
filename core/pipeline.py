@@ -32,8 +32,11 @@ def load_and_prepare_data(
     end_date: str,
     missing_threshold: float,
     use_cache: bool,
+
 ) -> tuple[pd.DataFrame, Dict]:
     """Загружает данные MOEX и выполняет базовую очистку/синхронизацию."""
+)   tuple[pd.DataFrame, Dict]:
+
     loader = MOEXLoader(use_cache=use_cache)
     raw_prices = loader.load_prices(tickers=tickers, start_date=start_date, end_date=end_date)
 
