@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""РџР°Р№РїР»Р°Р№РЅ Р·Р°РіСЂСѓР·РєРё, РѕС‚Р±РѕСЂР° РїР°СЂС‹ Рё Р±СЌРєС‚РµСЃС‚Р° (Р±РµР· Р·Р°РІРёСЃРёРјРѕСЃС‚Рё РѕС‚ Streamlit)."""
+"""Пайплайн загрузки, отбора пары и бэктеста (без зависимости от Streamlit)."""
 
 from __future__ import annotations
 
@@ -32,8 +32,8 @@ def load_and_prepare_data(
     end_date: str,
     missing_threshold: float,
     use_cache: bool,
-)   tuple[pd.DataFrame, Dict]:
-    """Р—Р°РіСЂСѓР¶Р°РµС‚ РґР°РЅРЅС‹Рµ MOEX Рё РІС‹РїРѕР»РЅСЏРµС‚ Р±Р°Р·РѕРІСѓСЋ РѕС‡РёСЃС‚РєСѓ/СЃРёРЅС…СЂРѕРЅРёР·Р°С†РёСЋ."""
+) -> tuple[pd.DataFrame, Dict]:
+    """Загружает данные MOEX и выполняет базовую очистку/синхронизацию."""
     loader = MOEXLoader(use_cache=use_cache)
     raw_prices = loader.load_prices(tickers=tickers, start_date=start_date, end_date=end_date)
 
@@ -43,7 +43,7 @@ def load_and_prepare_data(
     processed = processor.synchronize_dates() if cleaned is not None else None
 
     if processed is None or processed.empty:
-        raise ValueError("РџРѕСЃР»Рµ РѕР±СЂР°Р±РѕС‚РєРё РЅРµ РѕСЃС‚Р°Р»РѕСЃСЊ РґР°РЅРЅС‹С…. РџСЂРѕРІРµСЂСЊС‚Рµ С‚РёРєРµСЂС‹/РїРѕСЂРѕРі РїСЂРѕРїСѓСЃРєРѕРІ.")
+        raise ValueError("После обработки не осталось данных. Проверьте тикеры/порог пропусков.")
 
     return processed, quality
 
@@ -55,8 +55,8 @@ def run_full_pipeline(
     entry_z: float,
     exit_z: float,
     max_holding_days: int,
-)   Optional[Dict]:
-    """Р—Р°РїСѓСЃРєР°РµС‚ РїРѕРёСЃРє РїР°СЂС‹, РіРµРЅРµСЂР°С†РёСЋ СЃРёРіРЅР°Р»РѕРІ Рё Р±СЌРєС‚РµСЃС‚; РІРѕР·РІСЂР°С‰Р°РµС‚ СЃР»РѕРІР°СЂСЊ СЂРµР·СѓР»СЊС‚Р°С‚РѕРІ."""
+) -> Optional[Dict]:
+    """Запускает поиск пары, генерацию сигналов и бэктест; возвращает словарь результатов."""
     tester = CointegrationTester(prices=prices, p_value_threshold=p_value_threshold)
     tester.find_pairs()
     best_pair = tester.get_best_pair()
@@ -73,13 +73,7 @@ def run_full_pipeline(
     signals = strategy.generate_signals(max_holding_days=max_holding_days)
     trades = strategy.get_trades()
 
-
-     ticker_x, ticker_y = best_pair["pair"]
-    beta = best_pair["beta"]
-    pair_returns = prices[ticker_y].pct_change() - beta * prices[ticker_x].pct_change()
-
     pair_returns = _build_pair_returns(prices=prices, best_pair=best_pair)
-
 
     backtest = Backtest(
         signals=signals,
