@@ -17,6 +17,19 @@ from config.settings import coint_config, data_config, strategy_config
 from core.pipeline import load_and_prepare_data, run_full_pipeline
 
 
+def build_backtest_diagnosis(metrics: dict) -> tuple[str, str]:
+    """Simple qualitative interpretation of backtest metrics for UI."""
+    sharpe = float(metrics.get("sharpe_ratio", 0))
+    total_return = float(metrics.get("total_return", 0))
+    max_dd = float(metrics.get("max_drawdown", 0))
+
+    if sharpe >= 1.0 and total_return > 0 and max_dd > -0.25:
+        return "✅ Looks healthy", "Профиль результата выглядит устойчивым для учебного проекта."
+    if total_return > 0 and max_dd > -0.4:
+        return "🟡 Acceptable", "Есть прибыль, но риск/стабильность стоит улучшить (параметры, комиссии, walk-forward)."
+    return "⚠️ Weak / unstable", "Результат нестабилен: проверьте параметры, период, и устойчивость пары out-of-sample."
+
+
 def render_spread_chart(spread: pd.Series, zscore: pd.Series) -> go.Figure:
     """Render spread and z-score on two y-axes."""
     fig = go.Figure()
@@ -181,6 +194,8 @@ def main() -> None:
 
     st.markdown(f"**Estimated trades count:** {metrics['num_trades']}")
     st.markdown(f"**Profitable days share:** {metrics['win_rate']:.2%}")
+    quality_title, quality_comment = build_backtest_diagnosis(metrics)
+    st.info(f"**Backtest quality:** {quality_title}\n\n{quality_comment}")
 
     st.subheader("Trades")
     if trades.empty:
