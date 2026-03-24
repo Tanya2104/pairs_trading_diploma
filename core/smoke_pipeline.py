@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Smoke-РЎвЂљР ВµРЎРѓРЎвЂљ Р С—Р В°Р в„–Р С—Р В»Р В°Р в„–Р Р…Р В° (РЎРѓР С•Р Р†Р СР ВµРЎРѓРЎвЂљР С‘Р С РЎРѓ Р В·Р В°Р С—РЎС“РЎРѓР С”Р С•Р С `python core/smoke_pipeline.py`)."""
+"""Smoke-тест пайплайна (совместим с запуском `python core/smoke_pipeline.py`)."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from core.pipeline import run_full_pipeline
 
 
 def build_synthetic_prices(n_days: int = 180, seed: int = 42) -> pd.DataFrame:
-    """Р РЋР С•Р В·Р Т‘Р В°РЎвЂРЎвЂљ РЎРѓР С‘Р Р…РЎвЂљР ВµРЎвЂљР С‘РЎвЂЎР ВµРЎРѓР С”Р С‘Р Вµ Р С”Р С•Р С‘Р Р…РЎвЂљР ВµР С–РЎР‚Р С‘РЎР‚Р С•Р Р†Р В°Р Р…Р Р…РЎвЂ№Р Вµ РЎР‚РЎРЏР Т‘РЎвЂ№ РЎвЂ Р ВµР Р… Р Т‘Р В»РЎРЏ smoke-РЎвЂљР ВµРЎРѓРЎвЂљР В°."""
+    """Создаёт синтетические коинтегрированные ряды цен для smoke-теста."""
     rng = np.random.default_rng(seed)
     index = pd.date_range("2024-01-01", periods=n_days, freq="B")
     base = np.cumsum(rng.normal(0, 1, size=n_days)) + 100
@@ -27,7 +27,7 @@ def build_synthetic_prices(n_days: int = 180, seed: int = 42) -> pd.DataFrame:
 
 
 def main() -> None:
-    """Р вЂ”Р В°Р С—РЎС“РЎРѓР С”Р В°Р ВµРЎвЂљ smoke-РЎвЂљР ВµРЎРѓРЎвЂљ Р С‘ Р Р†Р В°Р В»Р С‘Р Т‘Р С‘РЎР‚РЎС“Р ВµРЎвЂљ РЎРѓРЎвЂљРЎР‚РЎС“Р С”РЎвЂљРЎС“РЎР‚РЎС“ РЎР‚Р ВµР В·РЎС“Р В»РЎРЉРЎвЂљР В°РЎвЂљР В°."""
+    """Запускает smoke-тест и валидирует структуру результата."""
     prices = build_synthetic_prices()
     result = run_full_pipeline(
         prices=prices,
@@ -39,11 +39,15 @@ def main() -> None:
     )
 
     if result is None:
-        raise RuntimeError("Smoke-РЎвЂљР ВµРЎРѓРЎвЂљ Р Р…Р Вµ Р С—РЎР‚Р С•РЎв‚¬РЎвЂР В»: Р С—Р В°РЎР‚Р В° Р Р…Р Вµ Р Р…Р В°Р в„–Р Т‘Р ВµР Р…Р В° Р Р…Р В° РЎРѓР С‘Р Р…РЎвЂљР ВµРЎвЂљР С‘РЎвЂЎР ВµРЎРѓР С”Р С‘РЎвЂ¦ Р Т‘Р В°Р Р…Р Р…РЎвЂ№РЎвЂ¦")
+        raise RuntimeError(
+            "Smoke-тест не прошёл: пара не найдена на синтетических данных"
+        )
 
     required_keys = {"best_pair", "signals", "trades", "metrics", "equity"}
     if not required_keys.issubset(result.keys()):
-        raise RuntimeError(f"Smoke-РЎвЂљР ВµРЎРѓРЎвЂљ Р Р…Р Вµ Р С—РЎР‚Р С•РЎв‚¬РЎвЂР В»: Р С•РЎвЂљРЎРѓРЎС“РЎвЂљРЎРѓРЎвЂљР Р†РЎС“РЎР‹РЎвЂљ Р С”Р В»РЎР‹РЎвЂЎР С‘ {required_keys - set(result.keys())}")
+        raise RuntimeError(
+            f"Smoke-тест не прошёл: отсутствуют ключи {required_keys - set(result.keys())}"
+        )
 
     print("SMOKE_TEST_OK")
 
