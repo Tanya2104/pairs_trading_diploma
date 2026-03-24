@@ -79,30 +79,55 @@ class PairsTradingStrategy:
         signals = pd.DataFrame(index=self.zscore.index)
         signals['zscore'] = self.zscore
         signals['signal'] = 0
-        
-        # Открытие позиций
-        signals.loc[self.zscore < -self.entry_z, 'signal'] = 1   # long
-        signals.loc[self.zscore > self.entry_z, 'signal'] = -1   # short
-        
-        # Удержание позиции (ffill вместо replace с method)
-        signals['position'] = signals['signal'].replace(0, np.nan).ffill().fillna(0)
-        
-        # Закрытие при возврате к exit_z
-        signals.loc[abs(self.zscore) < self.exit_z, 'position'] = 0
-        
-        # Закрытие по таймауту (если позиция держится слишком долго)
+
+        # Сигнал входа в позицию по экстремуму Z-score.
+        signals.loc[self.zscore < -self.entry_z, 'signal'] = 1   # long spread
+        signals.loc[self.zscore > self.entry_z, 'signal'] = -1   # short spread
+
+        # Позицию рассчитываем последовательным автоматом состояний.
+        # Это важно: после выхода нельзя "самопроизвольно" возвращать позицию
+        # через ffill, пока не появится новый явный сигнал входа.
+        position = 0
         days_held = 0
-        position_values = signals['position'].values.copy()
-        
-        for i in range(len(position_values)):
-            if position_values[i] != 0:
-                days_held += 1
-                if days_held >= max_holding_days:
-                    position_values[i] = 0
-                    days_held = 0
-            else:
+        position_values = []
+
+        for z, signal in zip(signals['zscore'].values, signals['signal'].values):
+            if np.isnan(z):
+                position_values.append(0)
+                position = 0
                 days_held = 0
-        
+                continue
+
+            if position == 0:
+                if signal != 0:
+                    position = int(signal)
+                    days_held = 1
+                position_values.append(position)
+                continue
+
+            # Закрытие по возврату к среднему.
+            if abs(z) < self.exit_z:
+                position = 0
+                days_held = 0
+                position_values.append(0)
+                continue
+
+            # Разворот сигнала: закрываем/переворачиваем позицию.
+            if signal != 0 and signal != position:
+                position = int(signal)
+                days_held = 1
+                position_values.append(position)
+                continue
+
+            # Удержание и контроль времени в позиции.
+            days_held += 1
+            if days_held >= max_holding_days:
+                position = 0
+                days_held = 0
+                position_values.append(0)
+            else:
+                position_values.append(position)
+
         signals['position'] = position_values
         
         self.signals = signals
