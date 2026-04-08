@@ -79,6 +79,7 @@ def render_spread_chart(spread: pd.Series, zscore: pd.Series) -> go.Figure:
         height=480,
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
     )
+    fig.update_xaxes(tickformat="%d.%m.%Y", hoverformat="%d.%m.%Y")
     return fig
 
 
@@ -88,6 +89,7 @@ def render_equity_chart(equity: pd.Series) -> go.Figure:
         go.Scatter(x=equity.index, y=equity.values, mode="lines", name="Капитал", line=dict(color="#2ca02c"))
     )
     fig.update_layout(title="Кривая капитала", xaxis_title="Дата", yaxis_title="Капитал", height=380)
+    fig.update_xaxes(tickformat="%d.%m.%Y", hoverformat="%d.%m.%Y")
     return fig
 
 
