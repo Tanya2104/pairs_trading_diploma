@@ -136,9 +136,9 @@ def _build_pair_returns(prices: pd.DataFrame, best_pair: Dict) -> pd.Series:
     return pair_returns.reindex(prices.index).fillna(0.0)
 
 
-def _build_backtest_details(bt_result: Dict, trades: pd.DataFrame) -> Dict:
+def _build_backtest_details(backtest_result: Dict, trades: pd.DataFrame) -> Dict:
     """Расширенная интерпретация бэктеста для UI."""
-    returns = bt_result["returns"].dropna()
+    returns = backtest_result["returns"].dropna()
     if returns.empty:
         return {
             "volatility_daily": 0.0,
@@ -227,15 +227,30 @@ def _run_strategy_backtest_for_pair(
     trades = strategy.get_trades()
     pair_returns = _build_pair_returns(prices=prices, best_pair={"pair": pair, "beta": beta})
     backtest = Backtest(signals=signals, spread=spread, pair_returns=pair_returns, initial_capital=1.0)
-    bt_result = backtest.run()
-    details = _build_backtest_details(bt_result=bt_result, trades=trades)
-    metrics = bt_result["metrics"]
-    metrics["final_capital"] = float(bt_result["cumulative_returns"].iloc[-1]) if len(bt_result["cumulative_returns"]) else 1.0
+    raw_backtest = backtest.run()
+    equity_curve = raw_backtest.get("cumulative_returns")
+    if equity_curve is None:
+        equity_curve = pd.Series(dtype=float)
+
+    peak = equity_curve.expanding().max() if len(equity_curve) else equity_curve
+    drawdown = (equity_curve - peak) / peak if len(equity_curve) else pd.Series(dtype=float)
+
+    metrics = dict(raw_backtest.get("metrics", {}))
+    metrics["final_capital"] = float(equity_curve.iloc[-1]) if len(equity_curve) else 1.0
+
+    backtest_result = {
+        "returns": raw_backtest.get("returns", pd.Series(dtype=float)),
+        "equity_curve": equity_curve,
+        "cumulative_returns": equity_curve,
+        "drawdown": drawdown.fillna(0.0) if len(drawdown) else drawdown,
+        "metrics": metrics,
+        "trades": trades,
+    }
+
+    details = _build_backtest_details(backtest_result=backtest_result, trades=trades)
     return {
         "signals": signals,
-        "trades": trades,
-        "metrics": metrics,
-        "equity": bt_result["cumulative_returns"],
+        "backtest_result": backtest_result,
         "details": details,
     }
 
@@ -317,7 +332,17 @@ def run_full_pipeline(
         max_holding_days=max_holding_days,
     )
     signals = coint_bt["signals"]
-    trades = coint_bt["trades"]
+    coint_backtest_result = coint_bt.get("backtest_result")
+    if coint_backtest_result is None:
+        coint_backtest_result = {
+            "returns": pd.Series(dtype=float),
+            "equity_curve": pd.Series(dtype=float),
+            "cumulative_returns": pd.Series(dtype=float),
+            "drawdown": pd.Series(dtype=float),
+            "metrics": {},
+            "trades": pd.DataFrame(),
+        }
+    trades = coint_backtest_result["trades"]
 
     # Анализ динамики спреда (раздел 3.3)
     ticker_1, ticker_2 = best_pair["pair"]
@@ -362,8 +387,8 @@ def run_full_pipeline(
         )
         correlation_backtest = {"pair": corr_pair, **corr_bt}
 
-        coint_metrics = coint_bt["metrics"]
-        corr_metrics = corr_bt["metrics"]
+        coint_metrics = coint_backtest_result["metrics"]
+        corr_metrics = corr_bt["backtest_result"]["metrics"]
         coint_score = (coint_metrics["sharpe_ratio"], coint_metrics["total_return"], coint_metrics["max_drawdown"])
         corr_score = (corr_metrics["sharpe_ratio"], corr_metrics["total_return"], corr_metrics["max_drawdown"])
         best_method = "cointegration" if coint_score >= corr_score else "correlation"
@@ -376,8 +401,9 @@ def run_full_pipeline(
         "best_pair": best_pair,
         "signals": signals,
         "trades": trades,
-        "metrics": coint_bt["metrics"],
-        "equity": bt_result["cumulative_returns"],
+        "metrics": coint_backtest_result["metrics"],
+        "equity": coint_backtest_result["equity_curve"],
+        "backtest_result": coint_backtest_result,
         "details": coint_details,
         "correlation_backtest": correlation_backtest,
         "comparison_table": tester.get_comparison_table(),
