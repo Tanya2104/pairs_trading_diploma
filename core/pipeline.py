@@ -240,6 +240,9 @@ def run_full_pipeline(
     """Запускает поиск пары, генерацию сигналов и бэктест; возвращает словарь результатов."""
     tester = CointegrationTester(prices=prices, p_value_threshold=p_value_threshold)
     tester.find_pairs()
+    coint_results_df = tester.results_to_dataframe()
+    coint_saved_files = tester.save_results()
+    coint_heatmap_path = tester.save_pvalue_heatmap()
 
     # 1) Статистический кандидат (как было раньше).
     best_pair = tester.get_best_pair()
@@ -299,13 +302,19 @@ def run_full_pipeline(
     beta = float(best_pair["beta"])
     spread = calculate_spread(prices[ticker_1], prices[ticker_2], beta)
     pair_label = f"{ticker_1} - {ticker_2}"
-    spread_df = calculate_zscore(spread=spread, window=20)
+    spread_df = calculate_zscore(spread=spread, window=z_window)
     spread_stats = spread_statistics(spread)
     saved_spread_files = save_spread_analysis(spread_df)
     out_dir = Path("data/results")
     out_dir.mkdir(parents=True, exist_ok=True)
     spread_plot_path = plot_spread(spread, pair_label, out_dir / "spread_dynamics.png")
-    zscore_plot_path = plot_zscore(spread_df["z_score"], pair_label, out_dir / "zscore_dynamics.png")
+    zscore_plot_path = plot_zscore(
+        spread_df["z_score"],
+        pair_label,
+        out_dir / "zscore_dynamics.png",
+        entry_z=entry_z,
+        exit_z=exit_z,
+    )
 
     backtest = Backtest(
         signals=signals,
@@ -372,6 +381,11 @@ def run_full_pipeline(
         "comparison_table": tester.get_comparison_table(),
         "best_method": best_method,
         "comparison_reason": comparison_reason,
+        "cointegration_analysis": {
+            "results_df": coint_results_df,
+            "saved_files": coint_saved_files,
+            "heatmap_path": coint_heatmap_path,
+        },
         "spread_analysis": {
             "pair": best_pair["pair"],
             "beta": beta,

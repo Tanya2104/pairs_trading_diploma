@@ -24,6 +24,7 @@ class StrategyConfig:
     zscore_window: int = 20
     entry_z: float = 2.0
     exit_z: float = 0.5
+    max_holding_days: int = 30
 
 
 @dataclass

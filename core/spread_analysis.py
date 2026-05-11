@@ -17,7 +17,7 @@ def calculate_spread(price_1: pd.Series, price_2: pd.Series, beta: float) -> pd.
     return spread
 
 
-def calculate_zscore(spread: pd.Series, window: int = 20) -> pd.DataFrame:
+def calculate_zscore(spread: pd.Series, window: int) -> pd.DataFrame:
     """Вычисляет rolling-mean/std и Z-score для заданного окна."""
     rolling_mean = spread.rolling(window=window).mean()
     rolling_std = spread.rolling(window=window).std()
@@ -51,16 +51,22 @@ def plot_spread(spread: pd.Series, pair_label: str, output_path: Path) -> str:
     return str(output_path)
 
 
-def plot_zscore(zscore: pd.Series, pair_label: str, output_path: Path) -> str:
-    """Строит и сохраняет график Z-score с пороговыми уровнями."""
+def plot_zscore(
+    zscore: pd.Series,
+    pair_label: str,
+    output_path: Path,
+    entry_z: float,
+    exit_z: float,
+) -> str:
+    """Строит и сохраняет график Z-score с актуальными пороговыми уровнями стратегии."""
     fig, ax = plt.subplots(figsize=(12, 5))
     ax.plot(zscore.index, zscore.values, label="Z-score", color="#ff7f0e")
     for level, style, color in [
-        (2, "--", "#d62728"),
-        (-2, "--", "#d62728"),
+        (entry_z, "--", "#d62728"),
+        (-entry_z, "--", "#d62728"),
         (0, "-", "#2ca02c"),
-        (0.5, ":", "#9467bd"),
-        (-0.5, ":", "#9467bd"),
+        (exit_z, ":", "#9467bd"),
+        (-exit_z, ":", "#9467bd"),
     ]:
         ax.axhline(level, linestyle=style, color=color, linewidth=1, label=f"Уровень {level:+g}")
     ax.set_title(f"Динамика Z-score для пары {pair_label}")

@@ -15,7 +15,6 @@ if ROOT_DIR not in sys.path:
 
 from config.settings import coint_config, data_config, strategy_config
 from core.pipeline import load_and_prepare_data, prepare_experimental_data, run_full_pipeline
-from core.cointegration import CointegrationTester
 
 
 def build_backtest_diagnosis(metrics: dict) -> tuple[str, str]:
@@ -143,7 +142,7 @@ def main() -> None:
             "Макс. дней удержания",
             min_value=3,
             max_value=120,
-            value=30,
+            value=int(strategy_config.max_holding_days),
             step=1,
         )
 
@@ -262,14 +261,13 @@ def main() -> None:
 
 
     st.subheader("Анализ коинтеграционных зависимостей")
-    tester = CointegrationTester(prices=prices, p_value_threshold=float(p_threshold))
-    tester.find_pairs()
-    results_df = tester.results_to_dataframe()
-    saved_files = tester.save_results()
-    heatmap_path = tester.save_pvalue_heatmap()
+    coint_analysis = result.get("cointegration_analysis", {})
+    results_df = coint_analysis.get("results_df", pd.DataFrame())
+    saved_files = coint_analysis.get("saved_files", {})
+    heatmap_path = coint_analysis.get("heatmap_path")
 
     total_pairs = len(results_df)
-    coint_df = results_df[results_df["cointegrated"]].copy()
+    coint_df = results_df[results_df["cointegrated"]].copy() if not results_df.empty else pd.DataFrame()
     coint_pairs_count = len(coint_df)
 
     k1, k2, k3 = st.columns(3)
@@ -281,17 +279,19 @@ def main() -> None:
     st.markdown("**Полная таблица результатов (сортировка по p-value):**")
     st.dataframe(results_df, use_container_width=True)
 
-    st.markdown("**Только коинтегрированные пары (p-value < 0.05):**")
+    st.markdown(f"**Только коинтегрированные пары (p-value < {float(p_threshold):.3f}):**")
     if coint_df.empty:
-        st.info("Коинтегрированные пары по критерию p-value < 0.05 не найдены.")
+        st.info("Коинтегрированные пары по выбранному критерию не найдены.")
     else:
         st.dataframe(coint_df, use_container_width=True)
 
-    st.image(heatmap_path, caption="Тепловая карта p-value коинтеграционных зависимостей")
-    st.caption(
-        "Файлы раздела 3.2 сохранены: "
-        f"{saved_files['full_csv']}, {saved_files['cointegrated_csv']}, {heatmap_path}"
-    )
+    if heatmap_path:
+        st.image(heatmap_path, caption="Тепловая карта p-value коинтеграционных зависимостей")
+    if saved_files:
+        st.caption(
+            "Файлы раздела 3.2 сохранены: "
+            f"{saved_files.get('full_csv', '-')}, {saved_files.get('cointegrated_csv', '-')}, {heatmap_path}"
+        )
 
     st.subheader("Анализ динамики спреда")
     spread_analysis = result.get("spread_analysis", {})
@@ -318,7 +318,7 @@ def main() -> None:
         s3.metric("Минимум", f"{spread_stats['min']:.6f}")
         s4.metric("Максимум", f"{spread_stats['max']:.6f}")
 
-        st.markdown("**Таблица spread и z-score (rolling=20):**")
+        st.markdown(f"**Таблица spread и z-score (rolling={int(z_window)}):**")
         st.dataframe(spread_df[["spread", "z_score"]].dropna().tail(50), use_container_width=True)
         st.caption(
             "Файлы раздела 3.3 сохранены: "
