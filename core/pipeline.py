@@ -9,6 +9,7 @@ from typing import Dict, Optional
 
 import pandas as pd
 import matplotlib.pyplot as plt
+import seaborn as sns
 
 from core.cointegration import CointegrationTester
 from core.correlation import CorrelationAnalyzer
@@ -208,6 +209,46 @@ def _get_top_correlation_pair(prices: pd.DataFrame) -> Optional[Dict]:
     }
 
 
+
+
+def _run_strategy_backtest_for_pair(
+    prices: pd.DataFrame,
+    pair: tuple[str, str],
+    beta: float,
+    spread: pd.Series,
+    z_window: int,
+    entry_z: float,
+    exit_z: float,
+    max_holding_days: int,
+) -> Dict:
+    """Единый пайплайн стратегия → сигналы → сделки → бэктест для выбранной пары."""
+    strategy = PairsTradingStrategy(spread=spread, window=z_window, entry_z=entry_z, exit_z=exit_z)
+    signals = strategy.generate_signals(max_holding_days=max_holding_days)
+    trades = strategy.get_trades()
+    pair_returns = _build_pair_returns(prices=prices, best_pair={"pair": pair, "beta": beta})
+    backtest = Backtest(signals=signals, spread=spread, pair_returns=pair_returns, initial_capital=1.0)
+    bt_result = backtest.run()
+    details = _build_backtest_details(bt_result=bt_result, trades=trades)
+    metrics = bt_result["metrics"]
+    metrics["final_capital"] = float(bt_result["cumulative_returns"].iloc[-1]) if len(bt_result["cumulative_returns"]) else 1.0
+    return {
+        "signals": signals,
+        "trades": trades,
+        "metrics": metrics,
+        "equity": bt_result["cumulative_returns"],
+        "details": details,
+    }
+
+
+def _save_correlation_heatmap(corr_matrix: pd.DataFrame, output_path: str = "data/results/heatmap_correlation.png") -> str:
+    fig, ax = plt.subplots(figsize=(10, 8))
+    sns.heatmap(corr_matrix, annot=True, fmt=".2f", cmap="RdBu_r", center=0, ax=ax)
+    ax.set_title("Корреляционная матрица цен закрытия")
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=160)
+    plt.close(fig)
+    return output_path
+
 def load_and_prepare_data(
     tickers: list[str],
     start_date: str,
@@ -265,16 +306,18 @@ def run_full_pipeline(
         best_pair = cointegrated[0] if cointegrated else tester.results[0]
         selection_mode = "auto"
 
-    strategy = PairsTradingStrategy(
+    coint_bt = _run_strategy_backtest_for_pair(
+        prices=prices,
+        pair=best_pair["pair"],
+        beta=float(best_pair["beta"]),
         spread=best_pair["spread"],
-        window=z_window,
+        z_window=z_window,
         entry_z=entry_z,
         exit_z=exit_z,
+        max_holding_days=max_holding_days,
     )
-    signals = strategy.generate_signals(max_holding_days=max_holding_days)
-    trades = strategy.get_trades()
-
-    pair_returns = _build_pair_returns(prices=prices, best_pair=best_pair)
+    signals = coint_bt["signals"]
+    trades = coint_bt["trades"]
 
     # Анализ динамики спреда (раздел 3.3)
     ticker_1, ticker_2 = best_pair["pair"]
@@ -295,14 +338,11 @@ def run_full_pipeline(
         exit_z=exit_z,
     )
 
-    backtest = Backtest(
-        signals=signals,
-        spread=best_pair["spread"],
-        pair_returns=pair_returns,
-        initial_capital=1.0,
-    )
-    bt_result = backtest.run()
-    coint_details = _build_backtest_details(bt_result=bt_result, trades=trades)
+    coint_details = coint_bt["details"]
+
+    corr_analyzer = CorrelationAnalyzer(prices)
+    corr_matrix = corr_analyzer.compute_correlation_matrix()
+    corr_heatmap_path = _save_correlation_heatmap(corr_matrix)
 
     corr_pair = _get_top_correlation_pair(prices=prices)
     correlation_backtest = None
@@ -310,37 +350,20 @@ def run_full_pipeline(
     comparison_reason = "Корреляционный бенчмарк недоступен для выбранной выборки."
 
     if corr_pair is not None:
-        corr_strategy = PairsTradingStrategy(
+        corr_bt = _run_strategy_backtest_for_pair(
+            prices=prices,
+            pair=corr_pair["pair"],
+            beta=float(corr_pair["beta"]),
             spread=corr_pair["spread"],
-            window=z_window,
+            z_window=z_window,
             entry_z=entry_z,
             exit_z=exit_z,
+            max_holding_days=max_holding_days,
         )
-        corr_signals = corr_strategy.generate_signals(max_holding_days=max_holding_days)
-        corr_trades = corr_strategy.get_trades()
-        corr_returns = _build_pair_returns(
-            prices=prices,
-            best_pair={"pair": corr_pair["pair"], "beta": corr_pair["beta"]},
-        )
-        corr_backtest = Backtest(
-            signals=corr_signals,
-            spread=corr_pair["spread"],
-            pair_returns=corr_returns,
-            initial_capital=1.0,
-        )
-        corr_result = corr_backtest.run()
-        corr_details = _build_backtest_details(bt_result=corr_result, trades=corr_trades)
-        correlation_backtest = {
-            "pair": corr_pair,
-            "signals": corr_signals,
-            "trades": corr_trades,
-            "metrics": corr_result["metrics"],
-            "equity": corr_result["cumulative_returns"],
-            "details": corr_details,
-        }
+        correlation_backtest = {"pair": corr_pair, **corr_bt}
 
-        coint_metrics = bt_result["metrics"]
-        corr_metrics = corr_result["metrics"]
+        coint_metrics = coint_bt["metrics"]
+        corr_metrics = corr_bt["metrics"]
         coint_score = (coint_metrics["sharpe_ratio"], coint_metrics["total_return"], coint_metrics["max_drawdown"])
         corr_score = (corr_metrics["sharpe_ratio"], corr_metrics["total_return"], corr_metrics["max_drawdown"])
         best_method = "cointegration" if coint_score >= corr_score else "correlation"
@@ -353,13 +376,17 @@ def run_full_pipeline(
         "best_pair": best_pair,
         "signals": signals,
         "trades": trades,
-        "metrics": bt_result["metrics"],
+        "metrics": coint_bt["metrics"],
         "equity": bt_result["cumulative_returns"],
         "details": coint_details,
         "correlation_backtest": correlation_backtest,
         "comparison_table": tester.get_comparison_table(),
         "best_method": best_method,
         "comparison_reason": comparison_reason,
+        "comparison_section": {
+            "correlation_matrix": corr_matrix,
+            "correlation_heatmap_path": corr_heatmap_path,
+        },
         "cointegration_analysis": {
             "results_df": coint_results_df,
             "saved_files": coint_saved_files,
