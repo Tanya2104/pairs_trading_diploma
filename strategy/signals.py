@@ -110,9 +110,9 @@ def build_trades_table(signals: pd.DataFrame) -> pd.DataFrame:
         if row["entry_flag"] in (1, -1):
             current_trade = {
                 "entry_date": dt,
-                "position_type": "long spread" if row["entry_flag"] == 1 else "short spread",
+                "position": "long spread" if row["entry_flag"] == 1 else "short spread",
                 "entry_position": int(row["entry_flag"]),
-                "entry_zscore": float(row["zscore"]),
+                "entry_z": float(row["zscore"]),
                 "entry_spread": float(row["spread"]),
             }
 
@@ -126,19 +126,30 @@ def build_trades_table(signals: pd.DataFrame) -> pd.DataFrame:
                 {
                     "entry_date": current_trade["entry_date"],
                     "exit_date": dt,
-                    "position_type": current_trade["position_type"],
-                    "entry_zscore": current_trade["entry_zscore"],
-                    "exit_zscore": float(row["zscore"]),
+                    "position": current_trade["position"],
+                    "entry_z": current_trade["entry_z"],
+                    "exit_z": float(row["zscore"]),
                     "holding_days": int((dt - current_trade["entry_date"]).days),
                     "exit_reason": row["exit_reason"],
-                    "trade_return": trade_return,
+                    "pnl": trade_return,
                     "entry_spread": entry_spread,
                     "exit_spread": exit_spread,
                 }
             )
             current_trade = None
 
-    return pd.DataFrame(trades)
+    required_columns = [
+        "entry_date",
+        "exit_date",
+        "position",
+        "entry_z",
+        "exit_z",
+        "holding_days",
+        "exit_reason",
+        "pnl",
+    ]
+    extra_columns = ["entry_spread", "exit_spread"]
+    return pd.DataFrame(trades, columns=required_columns + extra_columns)
 
 
 def plot_zscore_signals(

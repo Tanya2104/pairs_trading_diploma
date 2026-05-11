@@ -471,12 +471,12 @@ def main() -> None:
         st.info("Для выбранных параметров стратегии сделки не сформировались.")
     else:
         st.markdown("**Журнал сделок**")
-        st.dataframe(strategy_trades[["entry_date", "exit_date", "position_type", "entry_zscore", "exit_zscore", "holding_days", "exit_reason", "trade_return"]], use_container_width=True)
+        st.dataframe(strategy_trades[["entry_date", "exit_date", "position", "entry_z", "exit_z", "holding_days", "exit_reason", "pnl"]], use_container_width=True)
 
         total_trades = len(strategy_trades)
-        profitable = int((strategy_trades["trade_return"] > 0).sum())
+        profitable = int((strategy_trades["pnl"] > 0).sum())
         win_rate = profitable / total_trades if total_trades else 0.0
-        avg_return = float(strategy_trades["trade_return"].mean()) if total_trades else 0.0
+        avg_return = float(strategy_trades["pnl"].mean()) if total_trades else 0.0
         avg_holding = float(strategy_trades["holding_days"].mean()) if total_trades else 0.0
 
         t1, t2, t3, t4, t5 = st.columns(5)
