@@ -17,6 +17,11 @@ class MOEXLoader:
         
         if use_cache:
             os.makedirs(self.cache_dir, exist_ok=True)
+        self.last_load_info = {
+            "used_cache": False,
+            "cache_valid": None,
+            "cache_period": {"start": None, "end": None},
+        }
     
     def _get_cache_path(self, tickers, start_date, end_date):
         tickers_str = "_".join(tickers)
@@ -31,10 +36,36 @@ class MOEXLoader:
             end_date = data_config.end_date
         
         cache_path = self._get_cache_path(tickers, start_date, end_date)
-        
+
+        requested_start = pd.to_datetime(start_date)
+        requested_end = pd.to_datetime(end_date)
+        self.last_load_info = {
+            "used_cache": False,
+            "cache_valid": None,
+            "cache_period": {"start": None, "end": None},
+        }
+
         if self.use_cache and (not force_refresh) and os.path.exists(cache_path):
-            print(f"Загружено из кэша: {cache_path}")
-            return pd.read_csv(cache_path, index_col=0, parse_dates=True)
+            cache_df = pd.read_csv(cache_path, index_col=0, parse_dates=True)
+            cache_start = cache_df.index.min() if not cache_df.empty else None
+            cache_end = cache_df.index.max() if not cache_df.empty else None
+            cache_valid = bool(
+                cache_start is not None
+                and cache_end is not None
+                and cache_start <= requested_start
+                and cache_end >= requested_end
+            )
+            self.last_load_info["cache_period"] = {
+                "start": str(cache_start.date()) if cache_start is not None else None,
+                "end": str(cache_end.date()) if cache_end is not None else None,
+            }
+            self.last_load_info["cache_valid"] = cache_valid
+
+            if cache_valid:
+                self.last_load_info["used_cache"] = True
+                print(f"Загружено из валидного кэша: {cache_path}")
+                return cache_df
+            print(f"Кэш не покрывает период {start_date}..{end_date}, выполняю свежую загрузку: {cache_path}")
         
         prices = pd.DataFrame()
         
@@ -46,6 +77,7 @@ class MOEXLoader:
                 "from": start_date,
                 "to": end_date,
                 "iss.meta": "off",
+                "limit": 500,
             }
             
             all_rows = []
