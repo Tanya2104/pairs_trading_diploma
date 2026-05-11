@@ -447,6 +447,12 @@ def main() -> None:
         f"- Средний P&L сделки (в единицах спреда): **{details['avg_trade_pnl']:.4f}**"
     )
 
+    st.subheader("Сравнение коинтеграции и корреляции")
+    comparison_section = result.get("comparison_section", {})
+    corr_heatmap_path = comparison_section.get("correlation_heatmap_path")
+    if corr_heatmap_path:
+        st.image(corr_heatmap_path, caption="Heatmap корреляционной матрицы")
+
     st.subheader("Сравнение методов: коинтеграция vs корреляция")
     if corr_bt is None:
         st.warning("Корреляционный бенчмарк недоступен для выбранных настроек.")
@@ -472,6 +478,64 @@ def main() -> None:
         st.info("Матрица сравнения пуста.")
     else:
         st.dataframe(comparison_table.head(25), use_container_width=True)
+
+    # Глава 3.6: сопоставимые метрики и единые артефакты
+    compare_rows = []
+    coint_pair_name = f"{best_pair['pair'][0]}-{best_pair['pair'][1]}"
+    compare_rows.append({
+        "Подход": "Коинтеграция",
+        "Пара": coint_pair_name,
+        "Доходность": metrics["total_return"],
+        "Sharpe": metrics["sharpe_ratio"],
+        "Просадка": metrics["max_drawdown"],
+        "Сделок": metrics["num_trades"],
+        "Доля прибыльных сделок": metrics["win_rate"],
+        "Итог": metrics.get("final_capital", 1.0),
+    })
+
+    if corr_bt is not None:
+        corr_metrics = corr_bt["metrics"]
+        corr_pair_name = f"{corr_bt['pair']['pair'][0]}-{corr_bt['pair']['pair'][1]}"
+        compare_rows.append({
+            "Подход": "Корреляция",
+            "Пара": corr_pair_name,
+            "Доходность": corr_metrics["total_return"],
+            "Sharpe": corr_metrics["sharpe_ratio"],
+            "Просадка": corr_metrics["max_drawdown"],
+            "Сделок": corr_metrics["num_trades"],
+            "Доля прибыльных сделок": corr_metrics["win_rate"],
+            "Итог": corr_metrics.get("final_capital", 1.0),
+        })
+
+    compare_df = pd.DataFrame(compare_rows)
+    st.subheader("Сравнительная таблица (глава 3.6)")
+    st.dataframe(compare_df, use_container_width=True)
+
+    compare_chart = go.Figure()
+    compare_chart.add_trace(go.Scatter(x=result["equity"].index, y=result["equity"].values, mode="lines", name="Коинтеграция"))
+    if corr_bt is not None:
+        compare_chart.add_trace(go.Scatter(x=corr_bt["equity"].index, y=corr_bt["equity"].values, mode="lines", name="Корреляция"))
+    compare_chart.update_layout(title="Сравнение динамики капитала стратегий", xaxis_title="Дата", yaxis_title="Капитал")
+    compare_chart.update_xaxes(showgrid=True)
+    compare_chart.update_yaxes(showgrid=True)
+    st.plotly_chart(compare_chart, use_container_width=True)
+
+    st.caption("Пояснение: высокая корреляция не гарантирует устойчивую долгосрочную зависимость (коинтеграцию).")
+
+    high_corr_not_coint = comparison_table[(comparison_table["correlation"].abs() >= 0.8) & (comparison_table["is_cointegrated"] == False)] if not comparison_table.empty else pd.DataFrame()
+    if not high_corr_not_coint.empty:
+        st.warning("Обнаружены пары с высокой корреляцией без коинтеграции — это потенциально ложные сигналы.")
+        st.dataframe(high_corr_not_coint[["pair", "correlation", "p_value_coint", "status"]].head(10), use_container_width=True)
+
+    output_dir = os.path.join("data", "results")
+    os.makedirs(output_dir, exist_ok=True)
+    comparison_csv = os.path.join(output_dir, "comparison_cointegration_vs_correlation_3_6.csv")
+    comparison_png = os.path.join(output_dir, "capital_comparison_3_6.png")
+    compare_df.to_csv(comparison_csv, index=False)
+    cmp_saved = safe_save_plotly_figure(compare_chart, comparison_png)
+    if not cmp_saved:
+        st.warning("Не удалось сохранить PNG сравнительного графика капитала (3.6).")
+    st.caption(f"Файлы раздела 3.6 сохранены: {comparison_csv}, {corr_heatmap_path}, {comparison_png}")
 
     st.subheader("3.4 Реализация торговой стратегии")
     st.markdown("Параметры стратегии задаются пользователем в панели слева и используются в расчётах без жёсткого кодирования.")
