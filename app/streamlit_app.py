@@ -16,6 +16,7 @@ if ROOT_DIR not in sys.path:
 
 from config.settings import coint_config, data_config, strategy_config
 from core.pipeline import load_and_prepare_data, prepare_experimental_data, run_full_pipeline
+from strategy.signals import build_trades_table, generate_trading_signals, plot_spread_trades, plot_zscore_signals
 
 
 def build_backtest_diagnosis(metrics: dict) -> tuple[str, str]:
@@ -447,11 +448,65 @@ def main() -> None:
     else:
         st.dataframe(comparison_table.head(25), use_container_width=True)
 
-    st.subheader("Сделки")
-    if trades.empty:
-        st.info("Для текущих настроек сделки не сгенерированы.")
+    st.subheader("3.4 Реализация торговой стратегии")
+    st.markdown("Параметры стратегии задаются пользователем в панели слева и используются в расчётах без жёсткого кодирования.")
+
+    strategy_signals = generate_trading_signals(
+        spread=best_pair["spread"],
+        rolling_window=int(z_window),
+        entry_threshold=float(entry_z),
+        exit_threshold=float(exit_z),
+        max_holding_days=int(max_holding_days),
+    )
+    strategy_trades = build_trades_table(strategy_signals)
+
+    zscore_fig = plot_zscore_signals(strategy_signals, float(entry_z), float(exit_z))
+    spread_fig = plot_spread_trades(strategy_signals)
+
+    zc1, zc2 = st.columns(2)
+    zc1.plotly_chart(zscore_fig, use_container_width=True)
+    zc2.plotly_chart(spread_fig, use_container_width=True)
+
+    if strategy_trades.empty:
+        st.info("Для выбранных параметров стратегии сделки не сформировались.")
     else:
-        st.dataframe(trades, use_container_width=True)
+        st.markdown("**Журнал сделок**")
+        st.dataframe(strategy_trades[["entry_date", "exit_date", "position_type", "entry_zscore", "exit_zscore", "holding_days", "exit_reason", "trade_return"]], use_container_width=True)
+
+        total_trades = len(strategy_trades)
+        profitable = int((strategy_trades["trade_return"] > 0).sum())
+        win_rate = profitable / total_trades if total_trades else 0.0
+        avg_return = float(strategy_trades["trade_return"].mean()) if total_trades else 0.0
+        avg_holding = float(strategy_trades["holding_days"].mean()) if total_trades else 0.0
+
+        t1, t2, t3, t4, t5 = st.columns(5)
+        t1.metric("Количество сделок", total_trades)
+        t2.metric("Прибыльных", profitable)
+        t3.metric("Доля прибыльных", f"{win_rate:.2%}")
+        t4.metric("Средняя доходность сделки", f"{avg_return:.6f}")
+        t5.metric("Средняя длительность", f"{avg_holding:.1f} дн.")
+
+    output_dir = os.path.join("data", "results")
+    os.makedirs(output_dir, exist_ok=True)
+    trades_csv = os.path.join(output_dir, "trades_table_3_4.csv")
+    zscore_png = os.path.join(output_dir, "zscore_signals_3_4.png")
+    spread_png = os.path.join(output_dir, "spread_trades_3_4.png")
+    strategy_trades.to_csv(trades_csv, index=False)
+
+    image_save_errors = []
+    try:
+        zscore_fig.write_image(zscore_png, width=1400, height=700)
+    except Exception as exc:
+        image_save_errors.append(f"zscore_signals_3_4.png: {exc}")
+    try:
+        spread_fig.write_image(spread_png, width=1400, height=700)
+    except Exception as exc:
+        image_save_errors.append(f"spread_trades_3_4.png: {exc}")
+
+    if image_save_errors:
+        st.warning("Не удалось сохранить часть PNG-графиков. Установите kaleido. " + " | ".join(image_save_errors))
+
+    st.caption(f"Файлы раздела 3.4 сохранены: {trades_csv}, {zscore_png}, {spread_png}")
 
 
 if __name__ == "__main__":
