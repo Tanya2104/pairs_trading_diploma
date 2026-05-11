@@ -148,6 +148,15 @@ def main() -> None:
     st.dataframe(results_df, use_container_width=True)
     st.markdown(f"Выбрана пара: **{best_pair['pair'][0]} - {best_pair['pair'][1]}** (p-value={best_pair['p_value']:.6f}, beta={best_pair['beta']:.4f}, R²={best_pair['r_squared']:.4f}, half-life={best_pair['half_life']:.1f}).")
 
+    coint_heatmap_path = result["cointegration_analysis"].get("heatmap_path")
+    corr_heatmap_path = result["comparison_section"].get("correlation_heatmap_path")
+    if coint_heatmap_path:
+        st.image(coint_heatmap_path, caption="Матрица p-value коинтеграции")
+        st.caption("Светлые области соответствуют статистически значимым зависимостям между рядами (меньшие p-value).")
+    if corr_heatmap_path:
+        st.image(corr_heatmap_path, caption="Матрица коэффициентов корреляции")
+        st.caption("Высокая корреляция сама по себе не гарантирует наличие коинтеграции и устойчивого спреда.")
+
     st.subheader("3.3 Анализ динамики спреда")
     spread_analysis = result["spread_analysis"]
     st.image(spread_analysis["files"]["spread_plot_png"], caption="Динамика спреда")

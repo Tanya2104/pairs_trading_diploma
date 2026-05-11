@@ -168,7 +168,7 @@ class CointegrationTester:
         matrix = pd.DataFrame(np.nan, index=tickers, columns=tickers)
 
         for t in tickers:
-            matrix.loc[t, t] = 0.0
+            matrix.loc[t, t] = np.nan
 
         for result in self.results:
             t1, t2 = result["pair"]
@@ -178,26 +178,32 @@ class CointegrationTester:
         return matrix
 
     def save_pvalue_heatmap(self, output_path: str = "data/results/heatmap_pvalue_cointegration.png") -> str:
-        """Сохраняет heatmap матрицы p-value в PNG."""
+        """Сохраняет heatmap матрицы p-value в PNG/PDF."""
         pval_matrix = self.build_pvalue_matrix()
-        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+        output = Path(output_path)
+        output.parent.mkdir(parents=True, exist_ok=True)
 
-        plt.figure(figsize=(10, 8))
+        fig, ax = plt.subplots(figsize=(12, 9))
         sns.heatmap(
             pval_matrix,
             annot=True,
             fmt=".3f",
-            cmap="viridis_r",
+            cmap="viridis",
             linewidths=0.5,
             cbar_kws={"label": "p-value теста Энгла–Грэнджера"},
+            annot_kws={"fontsize": 9},
+            ax=ax,
         )
-        plt.title("Тепловая карта p-value коинтеграционных зависимостей")
-        plt.xlabel("Тикер")
-        plt.ylabel("Тикер")
-        plt.tight_layout()
-        plt.savefig(output_path, dpi=160)
-        plt.close()
-        return output_path
+        ax.set_title("Матрица p-value коинтеграции", fontsize=14, pad=12)
+        ax.set_xlabel("Тикер", fontsize=11)
+        ax.set_ylabel("Тикер", fontsize=11)
+        ax.tick_params(axis="both", labelsize=10)
+        fig.tight_layout(rect=(0.0, 0.06, 1.0, 1.0))
+
+        fig.savefig(output, dpi=200)
+        fig.savefig(output.with_suffix('.pdf'))
+        plt.close(fig)
+        return str(output)
 
     def _is_tradable_pair(self, result: Dict) -> bool:
         if not result["is_cointegrated"]:
