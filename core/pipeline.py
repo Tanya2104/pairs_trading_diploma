@@ -14,6 +14,7 @@ from core.cointegration import CointegrationTester
 from core.correlation import CorrelationAnalyzer
 from core.data_loader import MOEXLoader
 from core.data_processor import DataProcessor
+from core.spread_analysis import calculate_spread, calculate_zscore, plot_spread, plot_zscore, save_spread_analysis, spread_statistics
 from strategy.backtest import Backtest
 from strategy.signals import PairsTradingStrategy
 
@@ -293,6 +294,19 @@ def run_full_pipeline(
 
     pair_returns = _build_pair_returns(prices=prices, best_pair=best_pair)
 
+    # Анализ динамики спреда (раздел 3.3)
+    ticker_1, ticker_2 = best_pair["pair"]
+    beta = float(best_pair["beta"])
+    spread = calculate_spread(prices[ticker_1], prices[ticker_2], beta)
+    pair_label = f"{ticker_1} - {ticker_2}"
+    spread_df = calculate_zscore(spread=spread, window=20)
+    spread_stats = spread_statistics(spread)
+    saved_spread_files = save_spread_analysis(spread_df)
+    out_dir = Path("data/results")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    spread_plot_path = plot_spread(spread, pair_label, out_dir / "spread_dynamics.png")
+    zscore_plot_path = plot_zscore(spread_df["z_score"], pair_label, out_dir / "zscore_dynamics.png")
+
     backtest = Backtest(
         signals=signals,
         spread=best_pair["spread"],
@@ -358,4 +372,15 @@ def run_full_pipeline(
         "comparison_table": tester.get_comparison_table(),
         "best_method": best_method,
         "comparison_reason": comparison_reason,
+        "spread_analysis": {
+            "pair": best_pair["pair"],
+            "beta": beta,
+            "spread_df": spread_df,
+            "spread_stats": spread_stats,
+            "files": {
+                **saved_spread_files,
+                "spread_plot_png": spread_plot_path,
+                "zscore_plot_png": zscore_plot_path,
+            },
+        },
     }

@@ -293,6 +293,40 @@ def main() -> None:
         f"{saved_files['full_csv']}, {saved_files['cointegrated_csv']}, {heatmap_path}"
     )
 
+    st.subheader("Анализ динамики спреда")
+    spread_analysis = result.get("spread_analysis", {})
+    if spread_analysis:
+        spread_pair = spread_analysis["pair"]
+        spread_beta = spread_analysis["beta"]
+        spread_df = spread_analysis["spread_df"]
+        spread_stats = spread_analysis["spread_stats"]
+        spread_files = spread_analysis["files"]
+
+        st.markdown(f"**Выбранная пара:** {spread_pair[0]} - {spread_pair[1]}")
+        st.markdown(f"**Коэффициент beta:** `{spread_beta:.4f}`")
+
+        sa_col1, sa_col2 = st.columns(2)
+        with sa_col1:
+            st.image(spread_files["spread_plot_png"], caption="График динамики спреда")
+        with sa_col2:
+            st.image(spread_files["zscore_plot_png"], caption="График динамики Z-score")
+
+        st.markdown("**Статистика спреда:**")
+        s1, s2, s3, s4 = st.columns(4)
+        s1.metric("Среднее", f"{spread_stats['mean']:.6f}")
+        s2.metric("Ст. отклонение", f"{spread_stats['std']:.6f}")
+        s3.metric("Минимум", f"{spread_stats['min']:.6f}")
+        s4.metric("Максимум", f"{spread_stats['max']:.6f}")
+
+        st.markdown("**Таблица spread и z-score (rolling=20):**")
+        st.dataframe(spread_df[["spread", "z_score"]].dropna().tail(50), use_container_width=True)
+        st.caption(
+            "Файлы раздела 3.3 сохранены: "
+            f"{spread_files['spread_zscore_csv']}, "
+            f"{spread_files['spread_plot_png']}, "
+            f"{spread_files['zscore_plot_png']}"
+        )
+
     st.subheader("Лучшая коинтегрированная пара")
     st.markdown(
         f"**{best_pair['pair'][0]} - {best_pair['pair'][1]}**  \\\n"
