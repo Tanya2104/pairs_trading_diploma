@@ -458,13 +458,15 @@ def main() -> None:
         st.warning("Корреляционный бенчмарк недоступен для выбранных настроек.")
     else:
         coint_metrics = metrics
-        corr_metrics = corr_bt["metrics"]
+        corr_metrics = corr_bt.get("metrics", {})
+        if not corr_metrics:
+            st.warning("Метрики корреляционного подхода не рассчитаны")
         mc1, mc2, mc3, mc4 = st.columns(4)
         mc1.metric("Sharpe (коинт.)", f"{coint_metrics['sharpe_ratio']:.2f}")
-        mc2.metric("Sharpe (корр.)", f"{corr_metrics['sharpe_ratio']:.2f}")
+        mc2.metric("Sharpe (корр.)", f"{corr_metrics.get('sharpe_ratio', 0.0):.2f}")
         mc3.metric("Доходность (коинт.)", f"{coint_metrics['total_return']:.2%}")
-        mc4.metric("Доходность (корр.)", f"{corr_metrics['total_return']:.2%}")
-        st.info(build_method_comparison_text(coint_metrics, corr_metrics, result["best_method"]))
+        mc4.metric("Доходность (корр.)", f"{corr_metrics.get('total_return', 0.0):.2%}")
+        st.info(build_method_comparison_text(coint_metrics, corr_metrics or None, result["best_method"]))
         st.caption(result["comparison_reason"])
 
         corr_pair = corr_bt["pair"]
@@ -494,16 +496,18 @@ def main() -> None:
     })
 
     if corr_bt is not None:
-        corr_metrics = corr_bt["metrics"]
+        corr_metrics = corr_bt.get("metrics", {})
+        if not corr_metrics:
+            st.warning("Метрики корреляционного подхода не рассчитаны")
         corr_pair_name = f"{corr_bt['pair']['pair'][0]}-{corr_bt['pair']['pair'][1]}"
         compare_rows.append({
             "Подход": "Корреляция",
             "Пара": corr_pair_name,
-            "Доходность": corr_metrics["total_return"],
-            "Sharpe": corr_metrics["sharpe_ratio"],
-            "Просадка": corr_metrics["max_drawdown"],
-            "Сделок": corr_metrics["num_trades"],
-            "Доля прибыльных сделок": corr_metrics["win_rate"],
+            "Доходность": corr_metrics.get("total_return", 0.0),
+            "Sharpe": corr_metrics.get("sharpe_ratio", 0.0),
+            "Просадка": corr_metrics.get("max_drawdown", 0.0),
+            "Сделок": corr_metrics.get("num_trades", 0),
+            "Доля прибыльных сделок": corr_metrics.get("win_rate", 0.0),
             "Итог": corr_metrics.get("final_capital", 1.0),
         })
 
