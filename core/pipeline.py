@@ -257,13 +257,34 @@ def _run_strategy_backtest_for_pair(
 
 
 def _save_correlation_heatmap(corr_matrix: pd.DataFrame, output_path: str = "data/results/heatmap_correlation.png") -> str:
-    fig, ax = plt.subplots(figsize=(10, 8))
-    sns.heatmap(corr_matrix, annot=True, fmt=".2f", cmap="RdBu_r", center=0, ax=ax)
-    ax.set_title("Корреляционная матрица цен закрытия")
-    fig.tight_layout()
-    fig.savefig(output_path, dpi=160)
+    matrix = corr_matrix.copy()
+    for ticker in matrix.columns:
+        matrix.loc[ticker, ticker] = float("nan")
+
+    output = Path(output_path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+
+    fig, ax = plt.subplots(figsize=(12, 9))
+    sns.heatmap(
+        matrix,
+        annot=True,
+        fmt=".3f",
+        cmap="coolwarm",
+        center=0,
+        linewidths=0.5,
+        cbar_kws={"label": "Коэффициент корреляции Пирсона"},
+        annot_kws={"fontsize": 9},
+        ax=ax,
+    )
+    ax.set_title("Матрица коэффициентов корреляции", fontsize=14, pad=12)
+    ax.set_xlabel("Тикер", fontsize=11)
+    ax.set_ylabel("Тикер", fontsize=11)
+    ax.tick_params(axis="both", labelsize=10)
+    fig.tight_layout(rect=(0.0, 0.06, 1.0, 1.0))
+    fig.savefig(output, dpi=200)
+    fig.savefig(output.with_suffix('.pdf'))
     plt.close(fig)
-    return output_path
+    return str(output)
 
 def load_and_prepare_data(
     tickers: list[str],
