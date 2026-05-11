@@ -183,10 +183,10 @@ def main() -> None:
     c2.metric("Тикеров", int(quality.get("n_tickers", 0)))
     c3.metric("Пропусков", int(quality.get("missing_values", 0)))
     c4.metric("Пропуски, %", f"{quality.get('missing_pct', 0):.2f}")
-    st.dataframe(prices.tail(15), use_container_width=True)
 
     if result is None:
         st.warning("Для выбранного периода/настроек коинтегрированные пары не найдены.")
+        st.dataframe(prices.tail(15), use_container_width=True)
         return
 
     best_pair = result["best_pair"]
@@ -196,6 +196,28 @@ def main() -> None:
     details = result["details"]
     corr_bt = result.get("correlation_backtest")
     comparison_table = pd.DataFrame(result.get("comparison_table", []))
+
+    st.subheader("Таблицы: обработанные данные и коинтегрированные пары")
+    tab_data, tab_pairs = st.tabs(["Обработанные данные", "Выявленная коинтеграция"])
+
+    with tab_data:
+        st.caption("Последние 15 строк обработанных и синхронизированных цен.")
+        st.dataframe(prices.tail(15), use_container_width=True)
+
+    with tab_pairs:
+        if comparison_table.empty:
+            st.info("Пары для сравнения не найдены.")
+        else:
+            coint_pairs = comparison_table.copy()
+            if "status" in coint_pairs.columns:
+                coint_pairs = coint_pairs[coint_pairs["status"].astype(str).str.contains("cointegr", case=False, na=False)]
+            elif "p_value_coint" in coint_pairs.columns:
+                coint_pairs = coint_pairs[coint_pairs["p_value_coint"].notna()]
+
+            if coint_pairs.empty:
+                st.info("Статистически коинтегрированные пары не найдены для выбранных параметров.")
+            else:
+                st.dataframe(coint_pairs, use_container_width=True)
 
     st.subheader("Лучшая коинтегрированная пара")
     st.markdown(
