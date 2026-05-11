@@ -113,12 +113,12 @@ def build_trades_table(signals: pd.DataFrame) -> pd.DataFrame:
                 "position": "long spread" if row["entry_flag"] == 1 else "short spread",
                 "entry_position": int(row["entry_flag"]),
                 "entry_z": float(row["zscore"]),
-                "entry_spread": float(row["spread"]),
+                "entry_spread_raw": float(row["spread"]),
             }
 
         if current_trade is not None and row["exit_flag"] in (1, -1):
             exit_spread = float(row["spread"])
-            entry_spread = float(current_trade["entry_spread"])
+            entry_spread = float(current_trade["entry_spread_raw"])
             direction = int(current_trade["entry_position"])
             trade_return = direction * (exit_spread - entry_spread)
 
@@ -132,8 +132,8 @@ def build_trades_table(signals: pd.DataFrame) -> pd.DataFrame:
                     "holding_days": int((dt - current_trade["entry_date"]).days),
                     "exit_reason": row["exit_reason"],
                     "pnl": trade_return,
-                    "entry_spread": entry_spread,
-                    "exit_spread": exit_spread,
+                    "entry_spread_raw": entry_spread,
+                    "exit_spread_raw": exit_spread,
                 }
             )
             current_trade = None
@@ -148,7 +148,7 @@ def build_trades_table(signals: pd.DataFrame) -> pd.DataFrame:
         "exit_reason",
         "pnl",
     ]
-    extra_columns = ["entry_spread", "exit_spread"]
+    extra_columns = ["entry_spread_raw", "exit_spread_raw"]
     return pd.DataFrame(trades, columns=required_columns + extra_columns)
 
 
