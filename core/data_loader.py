@@ -75,8 +75,6 @@ class MOEXLoader:
             prices[ticker] = df['close']
             print(f"  ✓ {len(df)} дней")
         
-        prices = prices.dropna()
-        
         if self.use_cache and len(prices) > 0:
             prices.to_csv(cache_path)
             print(f"\nСохранено в кэш: {cache_path}")

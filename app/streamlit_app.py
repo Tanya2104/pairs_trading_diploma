@@ -14,7 +14,7 @@ if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
 from config.settings import coint_config, data_config, strategy_config
-from core.pipeline import load_and_prepare_data, run_full_pipeline
+from core.pipeline import load_and_prepare_data, prepare_experimental_data, run_full_pipeline
 
 
 def build_backtest_diagnosis(metrics: dict) -> tuple[str, str]:
@@ -158,6 +158,12 @@ def main() -> None:
 
     with st.spinner("Загружаем данные и выполняем анализ..."):
         try:
+            experimental_data = prepare_experimental_data(
+                tickers=tickers,
+                start_date=str(start_date),
+                end_date=str(end_date),
+                use_cache=use_cache,
+            )
             prices, quality = load_and_prepare_data(
                 tickers=tickers,
                 start_date=str(start_date),
@@ -176,6 +182,36 @@ def main() -> None:
         except Exception as exc:
             st.exception(exc)
             return
+
+    st.subheader("Описание экспериментальных данных")
+    quality_exp = experimental_data["quality"]
+    e1, e2, e3, e4 = st.columns(4)
+    e1.metric("Строк до очистки", quality_exp["Количество строк до очистки"])
+    e2.metric("Строк после очистки", quality_exp["Количество строк после очистки"])
+    e3.metric("Начало выборки", quality_exp["Дата начала выборки"])
+    e4.metric("Окончание выборки", quality_exp["Дата окончания выборки"])
+
+    st.markdown("**Пропущенные значения по каждому тикеру:**")
+    missing_df = pd.DataFrame.from_dict(
+        quality_exp["Пропуски по тикерам"], orient="index", columns=["Количество пропусков"]
+    )
+    missing_df.index.name = "Тикер"
+    st.dataframe(missing_df, use_container_width=True)
+
+    st.markdown("**Первые строки подготовленной выборки цен закрытия:**")
+    st.dataframe(experimental_data["head"], use_container_width=True)
+
+    st.markdown("**Описательная статистика по инструментам:**")
+    st.dataframe(experimental_data["stats"], use_container_width=True)
+
+    st.markdown("**График динамики цен закрытия акций:**")
+    st.image(experimental_data["files"]["plot_png"], caption="Динамика цен закрытия по выбранным тикерам")
+    st.caption(
+        "Результаты сохранены в файлы: "
+        f"{experimental_data['files']['prices_csv']}, "
+        f"{experimental_data['files']['stats_csv']}, "
+        f"{experimental_data['files']['plot_png']}"
+    )
 
     st.subheader("Качество данных и предобработка")
     c1, c2, c3, c4 = st.columns(4)
