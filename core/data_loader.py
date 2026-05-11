@@ -104,18 +104,59 @@ class MOEXLoader:
                 start += len(batch)
 
             if not all_rows or columns is None:
-                print(f"  ✗ Нет данных по {ticker}")
+                print(f"  ⚠ Нет данных по {ticker} за период {start_date}..{end_date}")
                 continue
 
             df = pd.DataFrame(all_rows, columns=columns)
             if df.empty:
+                print(f"  ⚠ Пустой ответ MOEX по {ticker} за период {start_date}..{end_date}")
                 continue
 
-            df['TRADEDATE'] = pd.to_datetime(df['TRADEDATE'])
-            df.set_index('TRADEDATE', inplace=True)
-            df['close'] = df['close'].astype(float)
+            # Нормализуем названия колонок MOEX: нижний регистр + обрезка пробелов.
+            df.columns = [str(col).strip().lower() for col in df.columns]
+            available_columns = list(df.columns)
 
-            prices[ticker] = df['close']
+            # Диагностика загруженных данных по тикеру.
+            print(
+                f"  ℹ Диагностика {ticker}: строк={len(df)}, "
+                f"колонки={available_columns}"
+            )
+
+            if "tradedate" not in df.columns:
+                raise ValueError(
+                    f"Не найдена колонка tradedate в данных MOEX для {ticker}. "
+                    f"Доступные колонки: {available_columns}"
+                )
+
+            close_candidates = [
+                "close",
+                "legalcloseprice",
+                "waprice",
+                "marketprice2",
+                "admittedquote",
+            ]
+            selected_close_column = next(
+                (candidate for candidate in close_candidates if candidate in df.columns),
+                None,
+            )
+
+            if selected_close_column is None:
+                raise ValueError(
+                    "Не найдена колонка цены закрытия в данных MOEX. "
+                    f"Тикер: {ticker}. Доступные колонки: {available_columns}"
+                )
+
+            print(f"  ℹ Выбрана колонка close для {ticker}: {selected_close_column}")
+
+            df["tradedate"] = pd.to_datetime(df["tradedate"])
+            df.set_index("tradedate", inplace=True)
+            df["close"] = pd.to_numeric(df[selected_close_column], errors="coerce")
+            df = df.dropna(subset=["close"])
+            if df.empty:
+                print(f"  ⚠ После преобразования цен нет валидных данных по {ticker}")
+                continue
+
+            prices[ticker] = df["close"]
             print(f"  ✓ {len(df)} дней")
         
         if self.use_cache and len(prices) > 0:
