@@ -127,7 +127,9 @@ def main() -> None:
     st.markdown("**Диагностический блок загрузки**")
     st.json(load_diagnostics)
     if not load_diagnostics.get("coverage_ok", False):
-        st.warning("Данные загружены не за весь выбранный период. Обновите данные или проверьте загрузку MOEX.")
+        st.warning(load_diagnostics.get("warning") or "Данные покрывают выбранный период не полностью. Проверьте загрузку или кэш")
+    elif load_diagnostics.get("info"):
+        st.info(load_diagnostics["info"])
     base_result = run_full_pipeline(
         prices=prices,
         p_value_threshold=float(p_threshold),
