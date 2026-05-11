@@ -209,6 +209,10 @@ def main() -> None:
             st.info("Пары для сравнения не найдены.")
         else:
             coint_pairs = comparison_table.copy()
+
+            if "is_cointegrated" in coint_pairs.columns:
+                coint_pairs = coint_pairs[coint_pairs["is_cointegrated"] == True]  # noqa: E712
+
             if "status" in coint_pairs.columns:
                 coint_pairs = coint_pairs[coint_pairs["status"].astype(str).str.contains("cointegr", case=False, na=False)]
             elif "p_value_coint" in coint_pairs.columns:
