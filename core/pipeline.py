@@ -330,7 +330,11 @@ def load_and_prepare_data(
 
     diagnostics = {
         "requested_period": {"start": start_date, "end": end_date},
-        "actual_period": {
+        "loaded_period": load_info.get("loaded_period") or {
+            "start": str(raw_prices.index.min().date()) if not raw_prices.empty else None,
+            "end": str(raw_prices.index.max().date()) if not raw_prices.empty else None,
+        },
+        "analysis_period": {
             "start": str(processed.index.min().date()),
             "end": str(processed.index.max().date()),
         },
@@ -342,7 +346,7 @@ def load_and_prepare_data(
         "failed_tickers": load_info.get("failed_tickers", []),
     }
     diagnostics["coverage_ok"] = bool(
-        diagnostics["actual_period"]["start"] <= start_date and diagnostics["actual_period"]["end"] >= end_date
+        diagnostics["analysis_period"]["start"] <= start_date and diagnostics["analysis_period"]["end"] >= end_date
     )
     diagnostics["warning"] = None if diagnostics["coverage_ok"] else "Период покрыт не полностью"
 
@@ -364,8 +368,19 @@ def run_full_pipeline(
     data_source: str = "MOEX ISS API",
     used_cache: bool = True,
     cache_valid: Optional[bool] = None,
+    loaded_period: Optional[Dict[str, Optional[str]]] = None,
 ) -> Optional[Dict]:
     """Запускает поиск пары, генерацию сигналов и бэктест; возвращает словарь результатов."""
+    analysis_prices = prices.sort_index()
+    if requested_start_date is not None:
+        analysis_prices = analysis_prices[analysis_prices.index >= pd.to_datetime(requested_start_date)]
+    if requested_end_date is not None:
+        analysis_prices = analysis_prices[analysis_prices.index <= pd.to_datetime(requested_end_date)]
+    if analysis_prices.empty:
+        return None
+
+    prices = analysis_prices
+
     tester = CointegrationTester(prices=prices, p_value_threshold=p_value_threshold)
     tester.find_pairs()
     coint_results_df = tester.results_to_dataframe()
@@ -515,15 +530,16 @@ def run_full_pipeline(
 
     diagnostics = {
         "requested_period": {"start": requested_start_date, "end": requested_end_date},
-        "actual_period": {"start": str(prices.index.min().date()), "end": str(prices.index.max().date())},
+        "loaded_period": loaded_period or {"start": str(prices.index.min().date()), "end": str(prices.index.max().date())},
+        "analysis_period": {"start": str(prices.index.min().date()), "end": str(prices.index.max().date())},
         "rows": int(len(prices)),
         "data_source": data_source,
         "used_cache": bool(used_cache),
         "cache_valid": cache_valid,
     }
     diagnostics["coverage_ok"] = bool(
-        (requested_start_date is None or diagnostics["actual_period"]["start"] <= requested_start_date)
-        and (requested_end_date is None or diagnostics["actual_period"]["end"] >= requested_end_date)
+        (requested_start_date is None or diagnostics["analysis_period"]["start"] <= requested_start_date)
+        and (requested_end_date is None or diagnostics["analysis_period"]["end"] >= requested_end_date)
     )
 
     return {
