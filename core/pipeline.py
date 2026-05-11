@@ -91,11 +91,12 @@ def prepare_experimental_data(
     stats_df.to_csv(stats_csv_path, index=False)
 
     fig, ax = plt.subplots(figsize=(12, 6))
-    for ticker in prices_clean.columns:
-        ax.plot(prices_clean.index, prices_clean[ticker], label=ticker, linewidth=1.2)
-    ax.set_title("Динамика цен закрытия акций за выбранный период")
+    normalized_prices = prices_clean / prices_clean.iloc[0] * 100
+    for ticker in normalized_prices.columns:
+        ax.plot(normalized_prices.index, normalized_prices[ticker], label=ticker, linewidth=1.2)
+    ax.set_title("Нормализованная динамика цен закрытия акций")
     ax.set_xlabel("Дата")
-    ax.set_ylabel("Цена закрытия")
+    ax.set_ylabel("Цена, % к начальному значению")
     ax.legend(loc="best", ncol=3, fontsize=8)
     ax.grid(alpha=0.3)
     fig.tight_layout()
@@ -297,6 +298,7 @@ def run_full_pipeline(
     max_holding_days: int,
     selected_pair: Optional[tuple[str, str]] = None,
     selection_mode: str = "auto",
+    quality_filters: Optional[Dict] = None,
 ) -> Optional[Dict]:
     """Запускает поиск пары, генерацию сигналов и бэктест; возвращает словарь результатов."""
     tester = CointegrationTester(prices=prices, p_value_threshold=p_value_threshold)
@@ -317,8 +319,30 @@ def run_full_pipeline(
                 pair_source = "cointegration:manual_user_selection"
                 break
     if best_pair is None:
-        cointegrated = [r for r in tester.results if r["is_cointegrated"]]
-        best_pair = cointegrated[0] if cointegrated else tester.results[0]
+        candidates = [r for r in tester.results if r["is_cointegrated"]]
+        if quality_filters and quality_filters.get("enabled"):
+            min_r2 = float(quality_filters.get("min_r2", 0.0))
+            min_abs_beta = float(quality_filters.get("min_abs_beta", 0.0))
+            min_hl = float(quality_filters.get("min_half_life", 0.0))
+            max_hl = float(quality_filters.get("max_half_life", float("inf")))
+            filtered = []
+            for r in candidates:
+                hl = float(r.get("half_life", 0.0))
+                if float(r.get("p_value", 1.0)) >= p_value_threshold:
+                    continue
+                if float(r.get("r_squared", 0.0)) <= min_r2:
+                    continue
+                if abs(float(r.get("beta", 0.0))) <= min_abs_beta:
+                    continue
+                if not (min_hl <= hl <= max_hl):
+                    continue
+                filtered.append(r)
+            if filtered:
+                candidates = filtered
+
+        best_pair = candidates[0] if candidates else (tester.results[0] if tester.results else None)
+        if best_pair is None:
+            return None
         selection_mode = "auto"
 
     coint_bt = _run_strategy_backtest_for_pair(
