@@ -11,7 +11,7 @@ class MOEXLoader:
     """Загрузчик данных через MOEX ISS API"""
     
     def __init__(self, use_cache=True):
-        self.base_url = "https://iss.moex.com/iss/engines/stock/markets/shares/boards/tqbr/securities"
+        self.base_url = "https://iss.moex.com/iss/history/engines/stock/markets/shares/boards/tqbr/securities"
         self.use_cache = use_cache
         self.cache_dir = "data/cache"
         
@@ -22,7 +22,7 @@ class MOEXLoader:
         tickers_str = "_".join(tickers)
         return os.path.join(self.cache_dir, f"moex_{tickers_str}_{start_date}_{end_date}.csv")
     
-    def load_prices(self, tickers=None, start_date=None, end_date=None):
+    def load_prices(self, tickers=None, start_date=None, end_date=None, force_refresh=False):
         if tickers is None:
             tickers = data_config.tickers
         if start_date is None:
@@ -32,7 +32,7 @@ class MOEXLoader:
         
         cache_path = self._get_cache_path(tickers, start_date, end_date)
         
-        if self.use_cache and os.path.exists(cache_path):
+        if self.use_cache and (not force_refresh) and os.path.exists(cache_path):
             print(f"Загружено из кэша: {cache_path}")
             return pd.read_csv(cache_path, index_col=0, parse_dates=True)
         
@@ -41,11 +41,11 @@ class MOEXLoader:
         for ticker in tickers:
             print(f"Загружаю {ticker}...")
             
-            url = f"{self.base_url}/{ticker}/candles.json"
+            url = f"{self.base_url}/{ticker}.json"
             params = {
                 "from": start_date,
                 "to": end_date,
-                "interval": 24
+                "iss.meta": "off",
             }
             
             all_rows = []
@@ -58,13 +58,16 @@ class MOEXLoader:
                     print(f"  ✗ Ошибка загрузки {ticker}: {response.status_code}")
                     break
                 data = response.json()
-                candle_payload = data.get("candles", {})
-                batch = candle_payload.get("data", [])
-                columns = candle_payload.get("columns", columns)
+                history_payload = data.get("history", {})
+                batch = history_payload.get("data", [])
+                columns = history_payload.get("columns", columns)
                 if not batch:
                     break
                 all_rows.extend(batch)
-                if len(batch) < 100:
+                cursor_payload = data.get("history.cursor", {})
+                cursor_data = cursor_payload.get("data", [])
+                total = cursor_data[0][1] if cursor_data else None
+                if total is None or len(all_rows) >= int(total):
                     break
                 start += len(batch)
 
@@ -76,8 +79,8 @@ class MOEXLoader:
             if df.empty:
                 continue
 
-            df['begin'] = pd.to_datetime(df['begin'])
-            df.set_index('begin', inplace=True)
+            df['TRADEDATE'] = pd.to_datetime(df['TRADEDATE'])
+            df.set_index('TRADEDATE', inplace=True)
             df['close'] = df['close'].astype(float)
 
             prices[ticker] = df['close']

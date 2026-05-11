@@ -176,22 +176,35 @@ def _build_backtest_details(backtest_result: Dict, trades: pd.DataFrame) -> Dict
     }
 
 
-def _get_top_correlation_pair(prices: pd.DataFrame) -> Optional[Dict]:
+def _get_top_correlation_pair(prices: pd.DataFrame, coint_results: Optional[list[Dict]] = None, p_threshold: float = 0.05) -> Optional[Dict]:
     """Находит пару с максимальной |корреляцией| и строит хедж-коэффициент по лог-ценам."""
     analyzer = CorrelationAnalyzer(prices)
     corr_matrix = analyzer.compute_correlation_matrix()
     tickers = prices.columns.tolist()
 
-    best_pair = None
-    best_corr = None
+    coint_map = {}
+    if coint_results:
+        coint_map = {tuple(r["pair"]): float(r["p_value"]) for r in coint_results}
+    ranked = []
     for t1, t2 in combinations(tickers, 2):
         corr = corr_matrix.loc[t1, t2]
-        if best_corr is None or abs(corr) > abs(best_corr):
-            best_corr = corr
-            best_pair = (t1, t2)
+        p_val = coint_map.get((t1, t2), coint_map.get((t2, t1), 1.0))
+        ranked.append((abs(corr), corr, (t1, t2), p_val))
 
-    if best_pair is None:
+    ranked.sort(key=lambda x: x[0], reverse=True)
+    selected = None
+    for _, corr, pair, p_val in ranked:
+        if p_val >= p_threshold:
+            selected = (corr, pair)
+            break
+    if selected is None and ranked:
+        _, corr, pair, _ = ranked[0]
+        selected = (corr, pair)
+
+    if selected is None:
         return None
+
+    best_corr, best_pair = selected
 
     pair_df = prices[list(best_pair)].dropna()
     if len(pair_df) < 30:
@@ -292,12 +305,12 @@ def load_and_prepare_data(
     end_date: str,
     missing_threshold: float,
     use_cache: bool,
-
+    force_refresh: bool = False,
 ) -> tuple[pd.DataFrame, Dict]:
     """Загружает данные MOEX и выполняет базовую очистку/синхронизацию."""
 
     loader = MOEXLoader(use_cache=use_cache)
-    raw_prices = loader.load_prices(tickers=tickers, start_date=start_date, end_date=end_date)
+    raw_prices = loader.load_prices(tickers=tickers, start_date=start_date, end_date=end_date, force_refresh=force_refresh)
 
     processor = DataProcessor(raw_prices)
     quality = processor.check_quality()
@@ -320,6 +333,10 @@ def run_full_pipeline(
     selected_pair: Optional[tuple[str, str]] = None,
     selection_mode: str = "auto",
     quality_filters: Optional[Dict] = None,
+    requested_start_date: Optional[str] = None,
+    requested_end_date: Optional[str] = None,
+    data_source: str = "MOEX ISS API",
+    used_cache: bool = True,
 ) -> Optional[Dict]:
     """Запускает поиск пары, генерацию сигналов и бэктест; возвращает словарь результатов."""
     tester = CointegrationTester(prices=prices, p_value_threshold=p_value_threshold)
@@ -414,7 +431,7 @@ def run_full_pipeline(
     corr_matrix = corr_analyzer.compute_correlation_matrix()
     corr_heatmap_path = _save_correlation_heatmap(corr_matrix)
 
-    corr_pair = _get_top_correlation_pair(prices=prices)
+    corr_pair = _get_top_correlation_pair(prices=prices, coint_results=tester.results, p_threshold=p_value_threshold)
     correlation_backtest = None
     best_method = "cointegration"
     comparison_reason = "Корреляционный бенчмарк недоступен для выбранной выборки."
@@ -469,6 +486,18 @@ def run_full_pipeline(
             f"Победитель: {best_method}."
         )
 
+    diagnostics = {
+        "requested_period": {"start": requested_start_date, "end": requested_end_date},
+        "actual_period": {"start": str(prices.index.min().date()), "end": str(prices.index.max().date())},
+        "rows": int(len(prices)),
+        "data_source": data_source,
+        "used_cache": bool(used_cache),
+    }
+    diagnostics["coverage_ok"] = bool(
+        (requested_start_date is None or diagnostics["actual_period"]["start"] <= requested_start_date)
+        and (requested_end_date is None or diagnostics["actual_period"]["end"] >= requested_end_date)
+    )
+
     return {
         "best_pair": best_pair,
         "signals": signals,
@@ -501,6 +530,7 @@ def run_full_pipeline(
                 "zscore_plot_png": zscore_plot_path,
             },
         },
+        "diagnostics": diagnostics,
         "selection_context": {
             "mode": selection_mode,
             "source": pair_source,
