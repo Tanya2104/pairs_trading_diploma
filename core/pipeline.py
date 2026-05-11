@@ -385,12 +385,39 @@ def run_full_pipeline(
             exit_z=exit_z,
             max_holding_days=max_holding_days,
         )
-        correlation_backtest = {"pair": corr_pair, **corr_bt}
+        corr_backtest_result = corr_bt.get("backtest_result", {})
+        corr_metrics = dict(corr_backtest_result.get("metrics", {}))
+        if not corr_metrics:
+            for fallback_key in ("summary", "performance", "backtest_metrics", "details"):
+                fallback_metrics = corr_backtest_result.get(fallback_key)
+                if isinstance(fallback_metrics, dict) and fallback_metrics:
+                    corr_metrics = dict(fallback_metrics)
+                    break
+
+        correlation_backtest = {
+            "pair": corr_pair,
+            "signals": corr_bt.get("signals"),
+            "details": corr_bt.get("details", {}),
+            "metrics": corr_metrics,
+            "trades": corr_backtest_result.get("trades", pd.DataFrame()),
+            "equity_curve": corr_backtest_result.get("equity_curve", pd.Series(dtype=float)),
+            "drawdown": corr_backtest_result.get("drawdown", pd.Series(dtype=float)),
+            # Backward compatibility for existing UI references.
+            "equity": corr_backtest_result.get("equity_curve", pd.Series(dtype=float)),
+            "backtest_result": corr_backtest_result,
+        }
 
         coint_metrics = coint_backtest_result["metrics"]
-        corr_metrics = corr_bt["backtest_result"]["metrics"]
-        coint_score = (coint_metrics["sharpe_ratio"], coint_metrics["total_return"], coint_metrics["max_drawdown"])
-        corr_score = (corr_metrics["sharpe_ratio"], corr_metrics["total_return"], corr_metrics["max_drawdown"])
+        coint_score = (
+            coint_metrics.get("sharpe_ratio", 0.0),
+            coint_metrics.get("total_return", 0.0),
+            coint_metrics.get("max_drawdown", 0.0),
+        )
+        corr_score = (
+            corr_metrics.get("sharpe_ratio", 0.0),
+            corr_metrics.get("total_return", 0.0),
+            corr_metrics.get("max_drawdown", 0.0),
+        )
         best_method = "cointegration" if coint_score >= corr_score else "correlation"
         comparison_reason = (
             "Сравнение по приоритету: Sharpe → Total Return → Max Drawdown. "
