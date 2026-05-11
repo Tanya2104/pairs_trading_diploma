@@ -306,11 +306,18 @@ def load_and_prepare_data(
     missing_threshold: float,
     use_cache: bool,
     force_refresh: bool = False,
+    progress_callback=None,
 ) -> tuple[pd.DataFrame, Dict, Dict]:
     """Загружает данные MOEX и выполняет базовую очистку/синхронизацию."""
 
     loader = MOEXLoader(use_cache=use_cache)
-    raw_prices = loader.load_prices(tickers=tickers, start_date=start_date, end_date=end_date, force_refresh=force_refresh)
+    raw_prices = loader.load_prices(
+        tickers=tickers,
+        start_date=start_date,
+        end_date=end_date,
+        force_refresh=force_refresh,
+        progress_callback=progress_callback,
+    )
     load_info = getattr(loader, "last_load_info", {})
 
     processor = DataProcessor(raw_prices)
@@ -331,6 +338,8 @@ def load_and_prepare_data(
         "data_source": "MOEX ISS API",
         "used_cache": bool(load_info.get("used_cache", False)),
         "cache_valid": load_info.get("cache_valid"),
+        "tickers_loaded": load_info.get("tickers_loaded", []),
+        "failed_tickers": load_info.get("failed_tickers", []),
     }
     diagnostics["coverage_ok"] = bool(
         diagnostics["actual_period"]["start"] <= start_date and diagnostics["actual_period"]["end"] >= end_date

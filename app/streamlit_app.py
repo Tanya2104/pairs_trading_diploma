@@ -77,21 +77,21 @@ def main() -> None:
             use_cache = True
             force_refresh = True
 
-        st.subheader("Коинтеграция и стратегия")
+        st.subheader("Коинтеграция")
         p_threshold = st.number_input("Порог p-value", 0.001, 0.2, float(coint_config.p_value_threshold), 0.001)
+        min_r2 = st.number_input("Минимальный R² (опционально)", 0.0, 1.0, 0.0, 0.05)
+        min_abs_beta = st.number_input("Минимальный |beta| (опционально)", 0.0, 10.0, 0.0, 0.1)
+        min_half_life = st.number_input("Half-life от (опционально)", 0.0, 500.0, 0.0, 1.0)
+        max_half_life = st.number_input("Half-life до (опционально)", 1.0, 500.0, 500.0, 1.0)
+
+        st.subheader("Стратегия")
         z_window = st.number_input("Окно Z-оценки", 5, 120, int(strategy_config.zscore_window), 1)
         entry_z = st.number_input("Порог входа |Z|", 0.5, 5.0, float(strategy_config.entry_z), 0.1)
         exit_z = st.number_input("Порог выхода |Z|<", 0.0, 2.0, float(strategy_config.exit_z), 0.1)
         max_holding_days = st.number_input("Макс. дней удержания", 3, 120, int(strategy_config.max_holding_days), 1)
 
-        st.subheader("Фильтры качества пары (опционально)")
-        use_filters = st.checkbox("Применять фильтры в авто-выборе", value=False)
-        min_r2 = st.number_input("Минимальный R²", 0.0, 1.0, 0.0, 0.05)
-        min_abs_beta = st.number_input("Минимальный |beta|", 0.0, 10.0, 0.0, 0.1)
-        min_half_life = st.number_input("Half-life от", 0.0, 500.0, 0.0, 1.0)
-        max_half_life = st.number_input("Half-life до", 1.0, 500.0, 500.0, 1.0)
-
-        selection_mode = st.radio("Режим выбора пары", ["auto", "manual"], format_func=lambda x: "Авто" if x == "auto" else "Ручной")
+        st.subheader("Выбор пары")
+        selection_mode = st.radio("Режим выбора пары", ["auto", "manual"], format_func=lambda x: "Авто по p-value" if x == "auto" else "Ручной выбор")
         run_btn = st.button("Запустить анализ", type="primary")
 
     if not run_btn:
@@ -101,18 +101,33 @@ def main() -> None:
         st.error("Выберите минимум 2 тикера.")
         return
 
-    signature = json.dumps({"tickers": tickers, "start": str(start_date), "end": str(end_date), "selection_mode": selection_mode, "p": p_threshold, "z": z_window, "e": entry_z, "x": exit_z, "h": max_holding_days, "filters": [use_filters, min_r2, min_abs_beta, min_half_life, max_half_life]}, sort_keys=True)
+    signature = json.dumps({"tickers": tickers, "start": str(start_date), "end": str(end_date), "selection_mode": selection_mode, "p": p_threshold, "z": z_window, "e": entry_z, "x": exit_z, "h": max_holding_days, "filters": [min_r2, min_abs_beta, min_half_life, max_half_life]}, sort_keys=True)
     if st.session_state.get("analysis_signature") != signature:
         st.session_state.pop("analysis_results", None)
         st.session_state["analysis_signature"] = signature
 
+    progress_bar = st.progress(0, text="Подготовка загрузки MOEX...")
+    status_placeholder = st.empty()
+
+    def on_load_progress(**info):
+        total_t = max(int(info.get("total_tickers", 1)), 1)
+        ticker_idx = int(info.get("ticker_index", 1))
+        progress_value = min(max(ticker_idx / total_t, 0.0), 1.0)
+        progress_bar.progress(progress_value, text=f"Загрузка MOEX: {info.get('ticker')} ({ticker_idx}/{total_t})")
+        status_placeholder.info(
+            f"Тикер: {info.get('ticker')} | страница: {info.get('page')} | offset: {info.get('offset')} | "
+            f"строк на странице: {info.get('batch_rows')} | всего по тикеру: {info.get('total_rows')}"
+        )
+
     experimental_data = prepare_experimental_data(tickers, str(start_date), str(end_date), use_cache and not force_refresh)
-    prices, quality, load_diagnostics = load_and_prepare_data(tickers, str(start_date), str(end_date), missing_threshold, use_cache, force_refresh=force_refresh)
+    prices, quality, load_diagnostics = load_and_prepare_data(
+        tickers, str(start_date), str(end_date), missing_threshold, use_cache, force_refresh=force_refresh, progress_callback=on_load_progress
+    )
+    progress_bar.progress(1.0, text="Загрузка MOEX завершена")
     st.markdown("**Диагностический блок загрузки**")
     st.json(load_diagnostics)
     if not load_diagnostics.get("coverage_ok", False):
-        st.error("Данные загружены не за весь выбранный период. Обновите данные или проверьте загрузку MOEX")
-        return
+        st.warning("Данные загружены не за весь выбранный период. Обновите данные или проверьте загрузку MOEX.")
     base_result = run_full_pipeline(
         prices=prices,
         p_value_threshold=float(p_threshold),
@@ -120,7 +135,7 @@ def main() -> None:
         entry_z=float(entry_z),
         exit_z=float(exit_z),
         max_holding_days=int(max_holding_days),
-        quality_filters={"enabled": use_filters, "min_r2": min_r2, "min_abs_beta": min_abs_beta, "min_half_life": min_half_life, "max_half_life": max_half_life},
+        quality_filters={"enabled": any([min_r2 > 0, min_abs_beta > 0, min_half_life > 0 or max_half_life < 500]), "min_r2": min_r2, "min_abs_beta": min_abs_beta, "min_half_life": min_half_life, "max_half_life": max_half_life},
         requested_start_date=str(start_date),
         requested_end_date=str(end_date),
         used_cache=bool(load_diagnostics.get("used_cache", False)),
@@ -147,7 +162,7 @@ def main() -> None:
         max_holding_days=int(max_holding_days),
         selected_pair=selected_pair,
         selection_mode=selection_mode,
-        quality_filters={"enabled": use_filters, "min_r2": min_r2, "min_abs_beta": min_abs_beta, "min_half_life": min_half_life, "max_half_life": max_half_life},
+        quality_filters={"enabled": any([min_r2 > 0, min_abs_beta > 0, min_half_life > 0 or max_half_life < 500]), "min_r2": min_r2, "min_abs_beta": min_abs_beta, "min_half_life": min_half_life, "max_half_life": max_half_life},
         requested_start_date=str(start_date),
         requested_end_date=str(end_date),
         used_cache=bool(load_diagnostics.get("used_cache", False)),
