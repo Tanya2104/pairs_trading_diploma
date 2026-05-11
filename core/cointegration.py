@@ -6,10 +6,13 @@ from __future__ import annotations
 import os
 import sys
 from itertools import combinations
+from pathlib import Path
 from typing import Dict, List, Optional
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import seaborn as sns
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -58,6 +61,18 @@ class CointegrationTester:
         except (ValueError, TypeError, ZeroDivisionError, ImportError):
             return np.inf
 
+    def _engle_granger_test(self, x: pd.Series, y: pd.Series, residuals: pd.Series) -> float:
+        """Возвращает p-value теста Энгла–Грэнджера (statsmodels.coint)."""
+        try:
+            from statsmodels.tsa.stattools import coint
+
+            _, p_value, _ = coint(y, x)
+            return float(p_value)
+        except (ImportError, ValueError, TypeError):
+            # Fallback к ADF на остатках, если coint недоступен/неустойчив.
+            adf_result = self.adf_tester.run(residuals)
+            return float(adf_result["p_value"])
+
     def test_pair(self, ticker1: str, ticker2: str) -> Optional[Dict]:
         x = self.prices[ticker1]
         y = self.prices[ticker2]
@@ -66,32 +81,31 @@ class CointegrationTester:
         if len(df_pair) < 30:
             return None
 
-        # Оцениваем коинтеграцию на лог-ценах: это стабилизирует масштаб
-        # и даёт более интерпретируемый hedge-ratio для пар с разными уровнями цен.
         X = np.log(df_pair.iloc[:, 0])
         Y = np.log(df_pair.iloc[:, 1])
 
         model = LinearRegression()
         model.fit(X, Y)
         coeffs = model.get_coefficients()
-        residuals = model.get_residuals()
+        residuals = pd.Series(model.get_residuals(), index=df_pair.index)
 
-        adf_result = self.adf_tester.run(pd.Series(residuals))
-        spread = pd.Series(residuals, index=df_pair.index)
-        half_life = self._calculate_half_life(spread)
+        p_value = self._engle_granger_test(X, Y, residuals)
+        adf_result = self.adf_tester.run(residuals)
+        half_life = self._calculate_half_life(residuals)
         correlation = self.correlation_analyzer.pearson_correlation(X, Y)
 
         return {
             "pair": (ticker1, ticker2),
-            "p_value": adf_result["p_value"],
+            "p_value": p_value,
             "adf_stat": adf_result["adf_stat"],
             "alpha": coeffs["alpha"],
             "beta": coeffs["beta"],
             "r_squared": coeffs["r_squared"],
-            "spread": spread,
+            "spread": residuals,
             "half_life": half_life,
             "correlation": correlation,
-            "is_cointegrated": adf_result["is_stationary"] and adf_result["p_value"] < self.threshold,
+            "cointegrated": p_value < self.threshold,
+            "is_cointegrated": p_value < self.threshold,
         }
 
     def find_pairs(self) -> List[Dict]:
@@ -104,25 +118,93 @@ class CointegrationTester:
         for t1, t2 in combinations(tickers, 2):
             result = self.test_pair(t1, t2)
             if result:
-                if result["is_cointegrated"]:
-                    print(
-                        f"  ✓ {t1}-{t2}: p={result['p_value']:.4f}, "
-                        f"r²={result['r_squared']:.3f}, r={result['correlation']:.3f}"
-                    )
                 self.results.append(result)
 
         self.results.sort(key=lambda x: x["p_value"])
         return self.results
 
+    def results_to_dataframe(self) -> pd.DataFrame:
+        """Итоговая таблица (pair, p_value, beta, r_squared, half_life, cointegrated)."""
+        if not self.results:
+            self.find_pairs()
+
+        rows = []
+        for r in self.results:
+            rows.append(
+                {
+                    "pair": f"{r['pair'][0]}-{r['pair'][1]}",
+                    "p_value": float(r["p_value"]),
+                    "beta": float(r["beta"]),
+                    "r_squared": float(r["r_squared"]),
+                    "half_life": float(r["half_life"]) if np.isfinite(r["half_life"]) else np.nan,
+                    "cointegrated": bool(r["cointegrated"]),
+                }
+            )
+
+        return pd.DataFrame(rows).sort_values("p_value", ascending=True).reset_index(drop=True)
+
+    def save_results(self, output_dir: str = "data/results") -> Dict[str, str]:
+        """Сохраняет полную таблицу и только коинтегрированные пары в CSV."""
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
+
+        results_df = self.results_to_dataframe()
+        coint_df = results_df[results_df["cointegrated"]].copy()
+
+        full_csv = output_path / "cointegration_results_all_pairs.csv"
+        coint_csv = output_path / "cointegration_results_cointegrated_pairs.csv"
+
+        results_df.to_csv(full_csv, index=False)
+        coint_df.to_csv(coint_csv, index=False)
+
+        return {"full_csv": str(full_csv), "cointegrated_csv": str(coint_csv)}
+
+    def build_pvalue_matrix(self) -> pd.DataFrame:
+        """Матрица p-value для heatmap."""
+        if not self.results:
+            self.find_pairs()
+
+        tickers = self.prices.columns.tolist()
+        matrix = pd.DataFrame(np.nan, index=tickers, columns=tickers)
+
+        for t in tickers:
+            matrix.loc[t, t] = 0.0
+
+        for result in self.results:
+            t1, t2 = result["pair"]
+            matrix.loc[t1, t2] = result["p_value"]
+            matrix.loc[t2, t1] = result["p_value"]
+
+        return matrix
+
+    def save_pvalue_heatmap(self, output_path: str = "data/results/heatmap_pvalue_cointegration.png") -> str:
+        """Сохраняет heatmap матрицы p-value в PNG."""
+        pval_matrix = self.build_pvalue_matrix()
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+
+        plt.figure(figsize=(10, 8))
+        sns.heatmap(
+            pval_matrix,
+            annot=True,
+            fmt=".3f",
+            cmap="viridis_r",
+            linewidths=0.5,
+            cbar_kws={"label": "p-value теста Энгла–Грэнджера"},
+        )
+        plt.title("Тепловая карта p-value коинтеграционных зависимостей")
+        plt.xlabel("Тикер")
+        plt.ylabel("Тикер")
+        plt.tight_layout()
+        plt.savefig(output_path, dpi=160)
+        plt.close()
+        return output_path
+
     def _is_tradable_pair(self, result: Dict) -> bool:
-        """Фильтр пар, пригодных для торговли, а не только статистически стационарных."""
         if not result["is_cointegrated"]:
             return False
-
         beta = result["beta"]
         half_life = result["half_life"]
         r_squared = result["r_squared"]
-
         if beta <= 0:
             return False
         if not np.isfinite(half_life):
@@ -131,94 +213,19 @@ class CointegrationTester:
             return False
         if r_squared < self.min_r_squared:
             return False
-
         return True
 
     def get_best_pair(self) -> Optional[Dict]:
         if not self.results:
             self.find_pairs()
-
         tradable = [r for r in self.results if self._is_tradable_pair(r)]
         if tradable:
             tradable.sort(key=lambda x: (x["p_value"], -x["r_squared"], x["half_life"]))
             return tradable[0]
-
-        # Fallback: если фильтр слишком строгий для текущей выборки,
-        # возвращаем лучшую статистически коинтегрированную пару.
         cointegrated = [r for r in self.results if r["is_cointegrated"]]
         return cointegrated[0] if cointegrated else None
 
     def get_comparison_table(self) -> List[Dict]:
         if not self.results:
             self.find_pairs()
-
         return self.correlation_analyzer.compare_with_cointegration(self.results)
-
-
-if __name__ == "__main__":
-    from config import data_config
-    from core.data_loader import MOEXLoader
-    from core.data_processor import DataProcessor
-
-    print("=" * 60)
-    print("Cointegrated-pairs search (Engle-Granger)")
-    print("=" * 60)
-
-    loader = MOEXLoader(use_cache=True)
-    raw_prices = loader.load_prices(
-        tickers=data_config.tickers[:8],
-        start_date="2023-01-01",
-        end_date="2023-12-31",
-    )
-
-    print(f"\nRaw data shape: {raw_prices.shape}")
-
-    print("\nData preprocessing...")
-    processor = DataProcessor(raw_prices)
-    processor.check_quality()
-    processor.remove_empty_tickers(threshold=0.3)
-    processor.synchronize_dates()
-
-    prices = processor.get_processed_data()
-    print(f"After preprocessing: {prices.shape}")
-
-    tester = CointegrationTester(prices, p_value_threshold=0.05)
-    results = tester.find_pairs()
-
-    print(f"\n{'=' * 60}")
-    print("Cointegration scan results")
-    print(f"{'=' * 60}")
-
-    cointegrated = [r for r in results if r["is_cointegrated"]]
-    print(f"\nCointegrated pairs found: {len(cointegrated)}")
-
-    for r in cointegrated[:10]:
-        print(f"\n  {r['pair'][0]} - {r['pair'][1]}:")
-        print(f"    p-value: {r['p_value']:.6f}")
-        print(f"    beta: {r['beta']:.4f}")
-        print(f"    R²: {r['r_squared']:.4f}")
-        print(f"    correlation: {r['correlation']:.4f}")
-        print(f"    half-life: {r['half_life']:.1f} days")
-
-    best = tester.get_best_pair()
-    if best:
-        print(f"\n{'=' * 60}")
-        print(f"Best pair: {best['pair'][0]} - {best['pair'][1]}")
-        print(f"{'=' * 60}")
-        print(f"  p-value: {best['p_value']:.6f}")
-        print(f"  beta: {best['beta']:.4f}")
-        print(f"  alpha: {best['alpha']:.2f}")
-        print(f"  R²: {best['r_squared']:.4f}")
-        print(f"  correlation: {best['correlation']:.4f}")
-        print(f"  half-life: {best['half_life']:.1f} days")
-
-    print(f"\n{'=' * 60}")
-    print("Correlation vs cointegration")
-    print(f"{'=' * 60}")
-
-    comparison = tester.get_comparison_table()
-    for row in comparison[:15]:
-        p_coint = f"{row['p_value_coint']:.6f}" if row["p_value_coint"] else "None"
-        print(f"  {row['pair']}: r={row['correlation']:.3f}, p_coint={p_coint}, {row['status']}")
-
-    print(tester.correlation_analyzer.summary(comparison))
