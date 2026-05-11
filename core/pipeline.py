@@ -149,13 +149,16 @@ def _build_backtest_details(bt_result: Dict, trades: pd.DataFrame) -> Dict:
             "avg_trade_pnl": 0.0,
         }
 
-    if trades.empty:
+    has_pnl = "pnl" in trades.columns
+    has_holding_days = "holding_days" in trades.columns
+
+    if trades.empty or not has_pnl:
         return {
             "volatility_daily": float(returns.std()),
             "best_day": float(returns.max()),
             "worst_day": float(returns.min()),
-            "avg_holding_days": 0.0,
-            "median_holding_days": 0.0,
+            "avg_holding_days": float(trades["holding_days"].mean()) if has_holding_days and not trades.empty else 0.0,
+            "median_holding_days": float(trades["holding_days"].median()) if has_holding_days and not trades.empty else 0.0,
             "trade_win_rate": 0.0,
             "avg_trade_pnl": 0.0,
         }
@@ -164,8 +167,8 @@ def _build_backtest_details(bt_result: Dict, trades: pd.DataFrame) -> Dict:
         "volatility_daily": float(returns.std()),
         "best_day": float(returns.max()),
         "worst_day": float(returns.min()),
-        "avg_holding_days": float(trades["holding_days"].mean()),
-        "median_holding_days": float(trades["holding_days"].median()),
+        "avg_holding_days": float(trades["holding_days"].mean()) if has_holding_days else 0.0,
+        "median_holding_days": float(trades["holding_days"].median()) if has_holding_days else 0.0,
         "trade_win_rate": float((trades["pnl"] > 0).mean()),
         "avg_trade_pnl": float(trades["pnl"].mean()),
     }
