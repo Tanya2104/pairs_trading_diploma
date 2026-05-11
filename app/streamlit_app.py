@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 import sys
 import json
+import logging
+from importlib.util import find_spec
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -17,6 +19,28 @@ if ROOT_DIR not in sys.path:
 from config.settings import coint_config, data_config, strategy_config
 from core.pipeline import load_and_prepare_data, prepare_experimental_data, run_full_pipeline
 from strategy.signals import build_trades_table, generate_trading_signals, plot_spread_trades, plot_zscore_signals
+
+
+logger = logging.getLogger(__name__)
+
+
+def is_kaleido_available() -> bool:
+    """Check whether kaleido is available for Plotly static image export."""
+    return find_spec("kaleido") is not None
+
+
+def safe_save_plotly_figure(fig: go.Figure, path: str) -> bool:
+    """Safely save Plotly figure as PNG without breaking the app."""
+    if not is_kaleido_available():
+        logger.warning("PNG export skipped: kaleido is not installed (path=%s)", path)
+        return False
+
+    try:
+        fig.write_image(path, width=1400, height=700)
+        return True
+    except Exception:
+        logger.exception("Failed to save Plotly PNG to %s", path)
+        return False
 
 
 def build_backtest_diagnosis(metrics: dict) -> tuple[str, str]:
@@ -493,18 +517,14 @@ def main() -> None:
     spread_png = os.path.join(output_dir, "spread_trades_3_4.png")
     strategy_trades.to_csv(trades_csv, index=False)
 
-    image_save_errors = []
-    try:
-        zscore_fig.write_image(zscore_png, width=1400, height=700)
-    except Exception as exc:
-        image_save_errors.append(f"zscore_signals_3_4.png: {exc}")
-    try:
-        spread_fig.write_image(spread_png, width=1400, height=700)
-    except Exception as exc:
-        image_save_errors.append(f"spread_trades_3_4.png: {exc}")
+    kaleido_available = is_kaleido_available()
+    zscore_saved = safe_save_plotly_figure(zscore_fig, zscore_png)
+    spread_saved = safe_save_plotly_figure(spread_fig, spread_png)
 
-    if image_save_errors:
-        st.warning("Не удалось сохранить часть PNG-графиков. Установите kaleido. " + " | ".join(image_save_errors))
+    if not kaleido_available:
+        st.warning("PNG-экспорт недоступен: не установлен пакет kaleido.")
+    elif not (zscore_saved and spread_saved):
+        st.warning("Не удалось сохранить часть PNG-графиков.")
 
     st.caption(f"Файлы раздела 3.4 сохранены: {trades_csv}, {zscore_png}, {spread_png}")
 
