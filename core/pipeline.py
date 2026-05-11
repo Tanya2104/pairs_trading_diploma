@@ -4,9 +4,11 @@
 from __future__ import annotations
 
 from itertools import combinations
+from pathlib import Path
 from typing import Dict, Optional
 
 import pandas as pd
+import matplotlib.pyplot as plt
 
 from core.cointegration import CointegrationTester
 from core.correlation import CorrelationAnalyzer
@@ -14,6 +16,110 @@ from core.data_loader import MOEXLoader
 from core.data_processor import DataProcessor
 from strategy.backtest import Backtest
 from strategy.signals import PairsTradingStrategy
+
+
+COMPANY_NAMES_MAP = {
+    "SBER": "ПАО Сбербанк",
+    "GAZP": "ПАО Газпром",
+    "LKOH": "ПАО ЛУКОЙЛ",
+    "ROSN": "ПАО НК Роснефть",
+    "NVTK": "ПАО НОВАТЭК",
+    "TATN": "ПАО Татнефть",
+    "GMKN": "ПАО ГМК Норильский никель",
+    "PLZL": "ПАО Полюс",
+    "CHMF": "ПАО Северсталь",
+    "NLMK": "ПАО НЛМК",
+    "MAGN": "ПАО ММК",
+    "YNDX": "МКПАО Яндекс",
+    "MTSS": "ПАО МТС",
+    "AFLT": "ПАО Аэрофлот",
+    "VTBR": "Банк ВТБ (ПАО)",
+}
+
+
+def prepare_experimental_data(
+    tickers: list[str],
+    start_date: str,
+    end_date: str,
+    use_cache: bool,
+    output_dir: str = "data/results",
+) -> Dict:
+    """Подготовка и описание экспериментальных данных для раздела 3.1 ВКР."""
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    loader = MOEXLoader(use_cache=use_cache)
+    prices_raw = loader.load_prices(tickers=tickers, start_date=start_date, end_date=end_date)
+    if prices_raw.empty:
+        raise ValueError("Не удалось загрузить данные по выбранным тикерам за указанный период.")
+
+    prices_raw = prices_raw.sort_index()
+    n_rows_before = len(prices_raw)
+    missing_by_ticker = prices_raw.isna().sum().astype(int)
+
+    prices_clean = prices_raw.sort_index().dropna(how="any")
+    if prices_clean.empty:
+        raise ValueError("После синхронизации и удаления пропусков данные отсутствуют.")
+
+    n_rows_after = len(prices_clean)
+    sample_start = prices_clean.index.min()
+    sample_end = prices_clean.index.max()
+
+    stats_rows = []
+    for ticker in prices_clean.columns:
+        series = prices_clean[ticker]
+        stats_rows.append(
+            {
+                "Тикер": ticker,
+                "Название компании": COMPANY_NAMES_MAP.get(ticker, ticker),
+                "Количество наблюдений": int(series.count()),
+                "Минимальная цена": float(series.min()),
+                "Максимальная цена": float(series.max()),
+                "Средняя цена": float(series.mean()),
+                "Стандартное отклонение": float(series.std()),
+            }
+        )
+    stats_df = pd.DataFrame(stats_rows)
+
+    prices_csv_path = output_path / "prepared_closing_prices.csv"
+    stats_csv_path = output_path / "descriptive_statistics.csv"
+    plot_png_path = output_path / "closing_prices_dynamics.png"
+
+    prices_clean.to_csv(prices_csv_path, index_label="Дата")
+    stats_df.to_csv(stats_csv_path, index=False)
+
+    fig, ax = plt.subplots(figsize=(12, 6))
+    for ticker in prices_clean.columns:
+        ax.plot(prices_clean.index, prices_clean[ticker], label=ticker, linewidth=1.2)
+    ax.set_title("Динамика цен закрытия акций за выбранный период")
+    ax.set_xlabel("Дата")
+    ax.set_ylabel("Цена закрытия")
+    ax.legend(loc="best", ncol=3, fontsize=8)
+    ax.grid(alpha=0.3)
+    fig.tight_layout()
+    fig.savefig(plot_png_path, dpi=150)
+    plt.close(fig)
+
+    quality = {
+        "Количество строк до очистки": int(n_rows_before),
+        "Количество строк после очистки": int(n_rows_after),
+        "Пропуски по тикерам": missing_by_ticker.to_dict(),
+        "Дата начала выборки": sample_start.strftime("%Y-%m-%d"),
+        "Дата окончания выборки": sample_end.strftime("%Y-%m-%d"),
+    }
+
+    return {
+        "prices_raw": prices_raw,
+        "prices_clean": prices_clean,
+        "quality": quality,
+        "head": prices_clean.head(10),
+        "stats": stats_df,
+        "files": {
+            "prices_csv": str(prices_csv_path),
+            "stats_csv": str(stats_csv_path),
+            "plot_png": str(plot_png_path),
+        },
+    }
 
 
 def _build_pair_returns(prices: pd.DataFrame, best_pair: Dict) -> pd.Series:
