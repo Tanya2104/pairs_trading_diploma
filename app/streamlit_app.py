@@ -15,6 +15,7 @@ if ROOT_DIR not in sys.path:
 
 from config.settings import coint_config, data_config, strategy_config
 from core.pipeline import load_and_prepare_data, prepare_experimental_data, run_full_pipeline
+from core.cointegration import CointegrationTester
 
 
 def build_backtest_diagnosis(metrics: dict) -> tuple[str, str]:
@@ -258,6 +259,39 @@ def main() -> None:
                 st.info("Статистически коинтегрированные пары не найдены для выбранных параметров.")
             else:
                 st.dataframe(coint_pairs, use_container_width=True)
+
+
+    st.subheader("Анализ коинтеграционных зависимостей")
+    tester = CointegrationTester(prices=prices, p_value_threshold=float(p_threshold))
+    tester.find_pairs()
+    results_df = tester.results_to_dataframe()
+    saved_files = tester.save_results()
+    heatmap_path = tester.save_pvalue_heatmap()
+
+    total_pairs = len(results_df)
+    coint_df = results_df[results_df["cointegrated"]].copy()
+    coint_pairs_count = len(coint_df)
+
+    k1, k2, k3 = st.columns(3)
+    k1.metric("Проверено пар", total_pairs)
+    k2.metric("Коинтегрированных пар", coint_pairs_count)
+    if not results_df.empty:
+        k3.metric("Лучшая пара (min p-value)", results_df.iloc[0]["pair"])
+
+    st.markdown("**Полная таблица результатов (сортировка по p-value):**")
+    st.dataframe(results_df, use_container_width=True)
+
+    st.markdown("**Только коинтегрированные пары (p-value < 0.05):**")
+    if coint_df.empty:
+        st.info("Коинтегрированные пары по критерию p-value < 0.05 не найдены.")
+    else:
+        st.dataframe(coint_df, use_container_width=True)
+
+    st.image(heatmap_path, caption="Тепловая карта p-value коинтеграционных зависимостей")
+    st.caption(
+        "Файлы раздела 3.2 сохранены: "
+        f"{saved_files['full_csv']}, {saved_files['cointegrated_csv']}, {heatmap_path}"
+    )
 
     st.subheader("Лучшая коинтегрированная пара")
     st.markdown(
