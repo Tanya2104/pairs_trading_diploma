@@ -11,6 +11,7 @@ from typing import Dict
 
 import numpy as np
 import pandas as pd
+import plotly.graph_objects as go
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -168,6 +169,131 @@ class Backtest:
           Доля прибыльных дней: {self.metrics['win_rate']:.2%}
           Оценка числа сделок: {self.metrics['num_trades']}
         """
+
+
+def calculate_equity_curve(
+    trades: pd.DataFrame,
+    initial_capital: float,
+    position_size: float,
+    commission: float = 0.0,
+) -> pd.DataFrame:
+    """Рассчитывает динамику капитала по уже сформированному журналу сделок."""
+    if trades is None or trades.empty:
+        return pd.DataFrame(columns=["date", "capital", "drawdown", "trade_return", "trade_pnl_money"]) 
+
+    required = {"exit_date", "pnl"}
+    missing_cols = required.difference(trades.columns)
+    if missing_cols:
+        raise ValueError(f"В журнале сделок отсутствуют колонки: {sorted(missing_cols)}")
+
+    trades_sorted = trades.copy()
+    trades_sorted["exit_date"] = pd.to_datetime(trades_sorted["exit_date"])
+    trades_sorted = trades_sorted.sort_values("exit_date").reset_index(drop=True)
+
+    capital = float(initial_capital)
+    records = []
+    for _, row in trades_sorted.iterrows():
+        gross_trade_return = float(row["pnl"]) * float(position_size)
+        net_trade_return = gross_trade_return - float(commission)
+        trade_pnl_money = capital * net_trade_return
+        capital += trade_pnl_money
+        records.append(
+            {
+                "date": row["exit_date"],
+                "capital": capital,
+                "trade_return": net_trade_return,
+                "trade_pnl_money": trade_pnl_money,
+            }
+        )
+
+    equity_df = pd.DataFrame(records)
+    equity_df["peak_capital"] = equity_df["capital"].cummax()
+    equity_df["drawdown"] = equity_df["capital"] / equity_df["peak_capital"] - 1.0
+    return equity_df
+
+
+def calculate_backtest_metrics(equity_df: pd.DataFrame, trades: pd.DataFrame, initial_capital: float) -> dict:
+    """Рассчитывает метрики бэктеста по журналу сделок и кривой капитала."""
+    if equity_df is None or equity_df.empty or trades is None or trades.empty:
+        return {
+            "total_return": 0.0,
+            "annual_return": 0.0,
+            "sharpe_ratio": 0.0,
+            "max_drawdown": 0.0,
+            "num_trades": 0,
+            "win_rate": 0.0,
+            "avg_trade_return": 0.0,
+            "avg_holding_days": 0.0,
+            "final_capital": float(initial_capital),
+        }
+
+    trade_returns = equity_df["trade_return"].astype(float)
+    final_capital = float(equity_df["capital"].iloc[-1])
+    total_return = final_capital / float(initial_capital) - 1.0 if initial_capital else 0.0
+
+    start_date = pd.to_datetime(trades["entry_date"]).min()
+    end_date = pd.to_datetime(trades["exit_date"]).max()
+    period_days = max((end_date - start_date).days, 1)
+    annual_return = (1.0 + total_return) ** (365.0 / period_days) - 1.0 if total_return > -1 else -1.0
+
+    sharpe_ratio = 0.0
+    if trade_returns.std(ddof=1) > 0:
+        trades_per_year = len(trade_returns) * 365.0 / period_days
+        sharpe_ratio = (trade_returns.mean() / trade_returns.std(ddof=1)) * np.sqrt(trades_per_year)
+
+    max_drawdown = float(equity_df["drawdown"].min())
+    num_trades = int(len(trades))
+    win_rate = float((trades["pnl"] > 0).mean()) if num_trades else 0.0
+    avg_trade_return = float(trades["pnl"].mean()) if num_trades else 0.0
+    avg_holding_days = float(trades["holding_days"].mean()) if "holding_days" in trades.columns and num_trades else 0.0
+
+    return {
+        "total_return": total_return,
+        "annual_return": annual_return,
+        "sharpe_ratio": float(sharpe_ratio),
+        "max_drawdown": max_drawdown,
+        "num_trades": num_trades,
+        "win_rate": win_rate,
+        "avg_trade_return": avg_trade_return,
+        "avg_holding_days": avg_holding_days,
+        "final_capital": final_capital,
+    }
+
+
+def plot_equity_curve(equity_df: pd.DataFrame) -> go.Figure:
+    """Строит график динамики капитала стратегии."""
+    fig = go.Figure()
+    if equity_df is not None and not equity_df.empty:
+        fig.add_trace(
+            go.Scatter(x=equity_df["date"], y=equity_df["capital"], mode="lines+markers", name="Капитал")
+        )
+    fig.update_layout(
+        title="Динамика капитала стратегии",
+        xaxis_title="Дата",
+        yaxis_title="Капитал",
+        template="plotly_white",
+    )
+    fig.update_xaxes(showgrid=True, tickformat="%d.%m.%Y", hoverformat="%d.%m.%Y")
+    fig.update_yaxes(showgrid=True)
+    return fig
+
+
+def plot_drawdown(equity_df: pd.DataFrame) -> go.Figure:
+    """Строит график просадки стратегии."""
+    fig = go.Figure()
+    if equity_df is not None and not equity_df.empty:
+        fig.add_trace(
+            go.Scatter(x=equity_df["date"], y=equity_df["drawdown"], mode="lines", fill="tozeroy", name="Просадка")
+        )
+    fig.update_layout(
+        title="Просадка стратегии",
+        xaxis_title="Дата",
+        yaxis_title="Величина просадки",
+        template="plotly_white",
+    )
+    fig.update_xaxes(showgrid=True, tickformat="%d.%m.%Y", hoverformat="%d.%m.%Y")
+    fig.update_yaxes(showgrid=True, tickformat=".2%")
+    return fig
 
 
 # ============= ТЕСТ =============
