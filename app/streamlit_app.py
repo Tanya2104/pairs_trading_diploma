@@ -140,6 +140,7 @@ def main() -> None:
         requested_end_date=str(end_date),
         used_cache=bool(load_diagnostics.get("used_cache", False)),
         cache_valid=load_diagnostics.get("cache_valid"),
+        loaded_period=load_diagnostics.get("loaded_period"),
     )
     if base_result is None:
         st.warning("Коинтегрированные пары не найдены.")
@@ -167,6 +168,7 @@ def main() -> None:
         requested_end_date=str(end_date),
         used_cache=bool(load_diagnostics.get("used_cache", False)),
         cache_valid=load_diagnostics.get("cache_valid"),
+        loaded_period=load_diagnostics.get("loaded_period"),
     )
 
     best_pair, metrics, corr_bt = result["best_pair"], result["metrics"], result.get("correlation_backtest")

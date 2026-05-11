@@ -24,6 +24,7 @@ class MOEXLoader:
             "cache_period": {"start": None, "end": None},
             "tickers_loaded": [],
             "failed_tickers": [],
+            "loaded_period": {"start": None, "end": None},
         }
     
     def _get_cache_path(self, tickers, start_date, end_date):
@@ -48,10 +49,11 @@ class MOEXLoader:
             "cache_period": {"start": None, "end": None},
             "tickers_loaded": [],
             "failed_tickers": [],
+            "loaded_period": {"start": None, "end": None},
         }
 
         if self.use_cache and (not force_refresh) and os.path.exists(cache_path):
-            cache_df = pd.read_csv(cache_path, index_col=0, parse_dates=True)
+            cache_df = pd.read_csv(cache_path, index_col=0, parse_dates=True).sort_index()
             cache_start = cache_df.index.min() if not cache_df.empty else None
             cache_end = cache_df.index.max() if not cache_df.empty else None
             cache_valid = bool(
@@ -68,8 +70,13 @@ class MOEXLoader:
 
             if cache_valid:
                 self.last_load_info["used_cache"] = True
+                self.last_load_info["loaded_period"] = {
+                    "start": str(cache_start.date()) if cache_start is not None else None,
+                    "end": str(cache_end.date()) if cache_end is not None else None,
+                }
+                filtered_cache = cache_df.loc[(cache_df.index >= requested_start) & (cache_df.index <= requested_end)]
                 print(f"Загружено из валидного кэша: {cache_path}")
-                return cache_df
+                return filtered_cache
             print(f"Кэш не покрывает период {start_date}..{end_date}, выполняю свежую загрузку: {cache_path}")
         
         prices = pd.DataFrame()
@@ -197,6 +204,16 @@ class MOEXLoader:
         
         self.last_load_info["tickers_loaded"] = loaded_tickers
         self.last_load_info["failed_tickers"] = sorted(set(failed_tickers))
+
+        prices = prices.sort_index()
+        prices = prices.loc[(prices.index >= requested_start) & (prices.index <= requested_end)]
+
+        loaded_start = prices.index.min() if not prices.empty else None
+        loaded_end = prices.index.max() if not prices.empty else None
+        self.last_load_info["loaded_period"] = {
+            "start": str(loaded_start.date()) if loaded_start is not None else None,
+            "end": str(loaded_end.date()) if loaded_end is not None else None,
+        }
 
         if self.use_cache and len(prices) > 0:
             prices.to_csv(cache_path)
