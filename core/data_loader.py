@@ -48,30 +48,38 @@ class MOEXLoader:
                 "interval": 24
             }
             
-            response = requests.get(url, params=params)
+            all_rows = []
+            columns = None
+            start = 0
+            while True:
+                paged_params = {**params, "start": start}
+                response = requests.get(url, params=paged_params, timeout=30)
+                if response.status_code != 200:
+                    print(f"  ✗ Ошибка загрузки {ticker}: {response.status_code}")
+                    break
+                data = response.json()
+                candle_payload = data.get("candles", {})
+                batch = candle_payload.get("data", [])
+                columns = candle_payload.get("columns", columns)
+                if not batch:
+                    break
+                all_rows.extend(batch)
+                if len(batch) < 100:
+                    break
+                start += len(batch)
 
-            if response.status_code != 200:
-                print(f"  ✗ Ошибка загрузки {ticker}: {response.status_code}")
-                continue
-
-            data = response.json()
-
-            if 'candles' not in data or not data['candles']['data']:
+            if not all_rows or columns is None:
                 print(f"  ✗ Нет данных по {ticker}")
                 continue
-            
-            columns = data['candles']['columns']
-            rows = data['candles']['data']
-            
-            df = pd.DataFrame(rows, columns=columns)
 
+            df = pd.DataFrame(all_rows, columns=columns)
             if df.empty:
                 continue
-                
+
             df['begin'] = pd.to_datetime(df['begin'])
             df.set_index('begin', inplace=True)
             df['close'] = df['close'].astype(float)
-            
+
             prices[ticker] = df['close']
             print(f"  ✓ {len(df)} дней")
         
