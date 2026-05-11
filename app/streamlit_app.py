@@ -72,6 +72,10 @@ def main() -> None:
         missing_threshold = st.slider("Макс. доля пропусков", 0.0, 0.8, 0.3, 0.05)
         use_cache = st.checkbox("Использовать кэш MOEX", value=True)
         force_refresh = st.checkbox("Обновить кэш (игнорировать сохранённые файлы)", value=False)
+        refresh_without_cache = st.button("Обновить данные без кэша")
+        if refresh_without_cache:
+            use_cache = True
+            force_refresh = True
 
         st.subheader("Коинтеграция и стратегия")
         p_threshold = st.number_input("Порог p-value", 0.001, 0.2, float(coint_config.p_value_threshold), 0.001)
@@ -103,7 +107,12 @@ def main() -> None:
         st.session_state["analysis_signature"] = signature
 
     experimental_data = prepare_experimental_data(tickers, str(start_date), str(end_date), use_cache and not force_refresh)
-    prices, quality = load_and_prepare_data(tickers, str(start_date), str(end_date), missing_threshold, use_cache, force_refresh=force_refresh)
+    prices, quality, load_diagnostics = load_and_prepare_data(tickers, str(start_date), str(end_date), missing_threshold, use_cache, force_refresh=force_refresh)
+    st.markdown("**Диагностический блок загрузки**")
+    st.json(load_diagnostics)
+    if not load_diagnostics.get("coverage_ok", False):
+        st.error("Данные загружены не за весь выбранный период. Обновите данные или проверьте загрузку MOEX")
+        return
     base_result = run_full_pipeline(
         prices=prices,
         p_value_threshold=float(p_threshold),
@@ -114,7 +123,8 @@ def main() -> None:
         quality_filters={"enabled": use_filters, "min_r2": min_r2, "min_abs_beta": min_abs_beta, "min_half_life": min_half_life, "max_half_life": max_half_life},
         requested_start_date=str(start_date),
         requested_end_date=str(end_date),
-        used_cache=bool(use_cache and not force_refresh),
+        used_cache=bool(load_diagnostics.get("used_cache", False)),
+        cache_valid=load_diagnostics.get("cache_valid"),
     )
     if base_result is None:
         st.warning("Коинтегрированные пары не найдены.")
@@ -140,7 +150,8 @@ def main() -> None:
         quality_filters={"enabled": use_filters, "min_r2": min_r2, "min_abs_beta": min_abs_beta, "min_half_life": min_half_life, "max_half_life": max_half_life},
         requested_start_date=str(start_date),
         requested_end_date=str(end_date),
-        used_cache=bool(use_cache and not force_refresh),
+        used_cache=bool(load_diagnostics.get("used_cache", False)),
+        cache_valid=load_diagnostics.get("cache_valid"),
     )
 
     best_pair, metrics, corr_bt = result["best_pair"], result["metrics"], result.get("correlation_backtest")
@@ -152,10 +163,6 @@ def main() -> None:
     st.dataframe(experimental_data["stats"], use_container_width=True)
     st.image(experimental_data["files"]["plot_png"], caption="Нормализованная динамика цен закрытия акций")
     d = result.get("diagnostics", {})
-    st.markdown("**Диагностический блок загрузки**")
-    st.json(d)
-    if not d.get("coverage_ok", True):
-        st.warning("Данные загружены не за весь выбранный пользователем период.")
 
     st.subheader("3.2 Анализ коинтеграционных зависимостей")
     st.dataframe(results_df, use_container_width=True)

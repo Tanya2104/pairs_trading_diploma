@@ -306,11 +306,12 @@ def load_and_prepare_data(
     missing_threshold: float,
     use_cache: bool,
     force_refresh: bool = False,
-) -> tuple[pd.DataFrame, Dict]:
+) -> tuple[pd.DataFrame, Dict, Dict]:
     """Загружает данные MOEX и выполняет базовую очистку/синхронизацию."""
 
     loader = MOEXLoader(use_cache=use_cache)
     raw_prices = loader.load_prices(tickers=tickers, start_date=start_date, end_date=end_date, force_refresh=force_refresh)
+    load_info = getattr(loader, "last_load_info", {})
 
     processor = DataProcessor(raw_prices)
     quality = processor.check_quality()
@@ -320,7 +321,23 @@ def load_and_prepare_data(
     if processed is None or processed.empty:
         raise ValueError("После обработки не осталось данных. Проверьте тикеры/порог пропусков.")
 
-    return processed, quality
+    diagnostics = {
+        "requested_period": {"start": start_date, "end": end_date},
+        "actual_period": {
+            "start": str(processed.index.min().date()),
+            "end": str(processed.index.max().date()),
+        },
+        "rows": int(len(processed)),
+        "data_source": "MOEX ISS API",
+        "used_cache": bool(load_info.get("used_cache", False)),
+        "cache_valid": load_info.get("cache_valid"),
+    }
+    diagnostics["coverage_ok"] = bool(
+        diagnostics["actual_period"]["start"] <= start_date and diagnostics["actual_period"]["end"] >= end_date
+    )
+    diagnostics["warning"] = None if diagnostics["coverage_ok"] else "Период покрыт не полностью"
+
+    return processed, quality, diagnostics
 
 
 def run_full_pipeline(
@@ -337,6 +354,7 @@ def run_full_pipeline(
     requested_end_date: Optional[str] = None,
     data_source: str = "MOEX ISS API",
     used_cache: bool = True,
+    cache_valid: Optional[bool] = None,
 ) -> Optional[Dict]:
     """Запускает поиск пары, генерацию сигналов и бэктест; возвращает словарь результатов."""
     tester = CointegrationTester(prices=prices, p_value_threshold=p_value_threshold)
@@ -492,6 +510,7 @@ def run_full_pipeline(
         "rows": int(len(prices)),
         "data_source": data_source,
         "used_cache": bool(used_cache),
+        "cache_valid": cache_valid,
     }
     diagnostics["coverage_ok"] = bool(
         (requested_start_date is None or diagnostics["actual_period"]["start"] <= requested_start_date)
