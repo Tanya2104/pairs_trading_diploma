@@ -54,8 +54,9 @@ def build_method_comparison_text(coint_metrics: dict, corr_metrics: dict | None)
     r_sh = float(corr_metrics.get("sharpe_ratio", 0))
     base = f"Сравнение результатов при выбранных параметрах: Sharpe {c_sh:.2f} vs {r_sh:.2f}; доходность {c_ret:.2%} vs {r_ret:.2%}."
     if c_ret > 0 or r_ret > 0:
-        winner = "Коинтеграция" if c_ret >= r_ret else "Корреляция"
-        return f"{base} Лидирует: {winner}."
+        if c_ret >= r_ret:
+            return f"{base} Лидирует: Коинтеграция."
+        return f"{base} На выбранном периоде корреляционный подход показал лучший результат, однако наличие ложных корреляций подтверждает ограниченность метода."
     return base
 
 
@@ -70,6 +71,7 @@ def main() -> None:
         end_date = st.date_input("Дата окончания", value=pd.to_datetime(data_config.end_date))
         missing_threshold = st.slider("Макс. доля пропусков", 0.0, 0.8, 0.3, 0.05)
         use_cache = st.checkbox("Использовать кэш MOEX", value=True)
+        force_refresh = st.checkbox("Обновить кэш (игнорировать сохранённые файлы)", value=False)
 
         st.subheader("Коинтеграция и стратегия")
         p_threshold = st.number_input("Порог p-value", 0.001, 0.2, float(coint_config.p_value_threshold), 0.001)
@@ -100,8 +102,8 @@ def main() -> None:
         st.session_state.pop("analysis_results", None)
         st.session_state["analysis_signature"] = signature
 
-    experimental_data = prepare_experimental_data(tickers, str(start_date), str(end_date), use_cache)
-    prices, quality = load_and_prepare_data(tickers, str(start_date), str(end_date), missing_threshold, use_cache)
+    experimental_data = prepare_experimental_data(tickers, str(start_date), str(end_date), use_cache and not force_refresh)
+    prices, quality = load_and_prepare_data(tickers, str(start_date), str(end_date), missing_threshold, use_cache, force_refresh=force_refresh)
     base_result = run_full_pipeline(
         prices=prices,
         p_value_threshold=float(p_threshold),
@@ -110,6 +112,9 @@ def main() -> None:
         exit_z=float(exit_z),
         max_holding_days=int(max_holding_days),
         quality_filters={"enabled": use_filters, "min_r2": min_r2, "min_abs_beta": min_abs_beta, "min_half_life": min_half_life, "max_half_life": max_half_life},
+        requested_start_date=str(start_date),
+        requested_end_date=str(end_date),
+        used_cache=bool(use_cache and not force_refresh),
     )
     if base_result is None:
         st.warning("Коинтегрированные пары не найдены.")
@@ -133,6 +138,9 @@ def main() -> None:
         selected_pair=selected_pair,
         selection_mode=selection_mode,
         quality_filters={"enabled": use_filters, "min_r2": min_r2, "min_abs_beta": min_abs_beta, "min_half_life": min_half_life, "max_half_life": max_half_life},
+        requested_start_date=str(start_date),
+        requested_end_date=str(end_date),
+        used_cache=bool(use_cache and not force_refresh),
     )
 
     best_pair, metrics, corr_bt = result["best_pair"], result["metrics"], result.get("correlation_backtest")
@@ -143,6 +151,11 @@ def main() -> None:
     st.dataframe(experimental_data["head"], use_container_width=True)
     st.dataframe(experimental_data["stats"], use_container_width=True)
     st.image(experimental_data["files"]["plot_png"], caption="Нормализованная динамика цен закрытия акций")
+    d = result.get("diagnostics", {})
+    st.markdown("**Диагностический блок загрузки**")
+    st.json(d)
+    if not d.get("coverage_ok", True):
+        st.warning("Данные загружены не за весь выбранный пользователем период.")
 
     st.subheader("3.2 Анализ коинтеграционных зависимостей")
     st.dataframe(results_df, use_container_width=True)
@@ -153,6 +166,7 @@ def main() -> None:
     if coint_heatmap_path:
         st.image(coint_heatmap_path, caption="Матрица p-value коинтеграции")
         st.caption("Светлые области соответствуют статистически значимым зависимостям между рядами (меньшие p-value).")
+        st.caption("Диагональ матрицы не заполняется, поскольку инструмент не тестируется сам с собой.")
     if corr_heatmap_path:
         st.image(corr_heatmap_path, caption="Матрица коэффициентов корреляции")
         st.caption("Высокая корреляция сама по себе не гарантирует наличие коинтеграции и устойчивого спреда.")

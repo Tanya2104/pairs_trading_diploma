@@ -142,14 +142,7 @@ class CorrelationAnalyzer:
                     half_life = None
                 
                 # Определяем статус
-                if is_cointegrated and abs(corr) > 0.7:
-                    status = "✅ Коинтеграция + высокая корреляция"
-                elif is_cointegrated and abs(corr) <= 0.7:
-                    status = "🔍 Скрытая коинтеграция (корреляция низкая)"
-                elif not is_cointegrated and abs(corr) > 0.7:
-                    status = "⚠️ Ложная корреляция (нет коинтеграции)"
-                else:
-                    status = "❌ Нет значимой связи"
+                status = "коинтеграция подтверждена" if is_cointegrated else "ложная корреляция"
                 
                 comparison.append({
                     'pair': pair_name,
