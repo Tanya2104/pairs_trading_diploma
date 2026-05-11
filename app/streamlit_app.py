@@ -18,6 +18,7 @@ if ROOT_DIR not in sys.path:
 
 from config.settings import coint_config, data_config, strategy_config
 from core.pipeline import load_and_prepare_data, prepare_experimental_data, run_full_pipeline
+from strategy.backtest import calculate_backtest_metrics, calculate_equity_curve, plot_drawdown, plot_equity_curve
 from strategy.signals import build_trades_table, generate_trading_signals, plot_spread_trades, plot_zscore_signals
 
 
@@ -527,6 +528,71 @@ def main() -> None:
         st.warning("Не удалось сохранить часть PNG-графиков.")
 
     st.caption(f"Файлы раздела 3.4 сохранены: {trades_csv}, {zscore_png}, {spread_png}")
+
+    st.subheader("3.5 Результаты бэктеста")
+    bt1, bt2, bt3 = st.columns(3)
+    initial_capital_input = bt1.number_input("Начальный капитал", min_value=1000.0, value=100000.0, step=1000.0)
+    position_size_input = bt2.number_input("Доля капитала в сделке", min_value=0.01, max_value=1.0, value=1.0, step=0.01)
+    commission_input = bt3.number_input("Комиссия на сделку (доля)", min_value=0.0, max_value=1.0, value=0.0, step=0.0001)
+
+    if strategy_trades.empty:
+        st.warning("За выбранный период и параметры стратегия не сформировала сделок")
+    else:
+        equity_df = calculate_equity_curve(
+            trades=strategy_trades,
+            initial_capital=float(initial_capital_input),
+            position_size=float(position_size_input),
+            commission=float(commission_input),
+        )
+        bt_metrics = calculate_backtest_metrics(
+            equity_df=equity_df,
+            trades=strategy_trades,
+            initial_capital=float(initial_capital_input),
+        )
+
+        metrics_table = pd.DataFrame(
+            [
+                ("Совокупная доходность", f"{bt_metrics['total_return']:.2%}"),
+                ("Годовая доходность", f"{bt_metrics['annual_return']:.2%}"),
+                ("Коэффициент Шарпа", f"{bt_metrics['sharpe_ratio']:.2f}"),
+                ("Максимальная просадка", f"{bt_metrics['max_drawdown']:.2%}"),
+                ("Количество сделок", bt_metrics["num_trades"]),
+                ("Доля прибыльных сделок", f"{bt_metrics['win_rate']:.2%}"),
+                ("Средняя доходность сделки", f"{bt_metrics['avg_trade_return']:.6f}"),
+                ("Средняя длительность сделки", f"{bt_metrics['avg_holding_days']:.1f} дн."),
+                ("Итоговый капитал", f"{bt_metrics['final_capital']:.2f}"),
+            ],
+            columns=["Показатель", "Значение"],
+        )
+        st.markdown("**Таблица показателей эффективности**")
+        st.dataframe(metrics_table, use_container_width=True)
+
+        equity_fig = plot_equity_curve(equity_df)
+        drawdown_fig = plot_drawdown(equity_df)
+        bc1, bc2 = st.columns(2)
+        bc1.plotly_chart(equity_fig, use_container_width=True)
+        bc2.plotly_chart(drawdown_fig, use_container_width=True)
+
+        st.markdown("**Журнал сделок (раздел 3.4)**")
+        st.dataframe(strategy_trades, use_container_width=True)
+
+        metrics_csv = os.path.join(output_dir, "backtest_metrics_3_5.csv")
+        trades_35_csv = os.path.join(output_dir, "trades_table_3_5.csv")
+        equity_png = os.path.join(output_dir, "equity_curve_3_5.png")
+        drawdown_png = os.path.join(output_dir, "drawdown_curve_3_5.png")
+
+        metrics_table.to_csv(metrics_csv, index=False)
+        strategy_trades.to_csv(trades_35_csv, index=False)
+        equity_saved = safe_save_plotly_figure(equity_fig, equity_png)
+        drawdown_saved = safe_save_plotly_figure(drawdown_fig, drawdown_png)
+
+        if kaleido_available and not (equity_saved and drawdown_saved):
+            st.warning("Не удалось сохранить часть PNG-графиков раздела 3.5.")
+
+        st.caption(
+            "Файлы раздела 3.5 сохранены: "
+            f"{metrics_csv}, {trades_35_csv}, {equity_png}, {drawdown_png}"
+        )
 
 
 if __name__ == "__main__":
