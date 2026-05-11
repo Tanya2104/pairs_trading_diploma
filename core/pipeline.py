@@ -39,6 +39,56 @@ COMPANY_NAMES_MAP = {
 }
 
 
+def _evaluate_period_coverage(
+    requested_start: Optional[str],
+    requested_end: Optional[str],
+    actual_start: Optional[str],
+    actual_end: Optional[str],
+    rows: int,
+    tolerance_days: int = 10,
+) -> Dict:
+    """Оценивает полноту покрытия фактического периода относительно запрошенного."""
+    start_gap_days = None
+    end_gap_days = None
+    coverage_ok = rows > 0
+    coverage_reason = "ok"
+
+    if requested_start and actual_start:
+        start_gap_days = (pd.Timestamp(actual_start) - pd.Timestamp(requested_start)).days
+        if start_gap_days < 0 or start_gap_days > tolerance_days:
+            coverage_ok = False
+            coverage_reason = "start_gap_exceeds_tolerance"
+
+    if requested_end and actual_end:
+        end_gap_days = (pd.Timestamp(requested_end) - pd.Timestamp(actual_end)).days
+        if end_gap_days < 0 or end_gap_days > tolerance_days:
+            coverage_ok = False
+            coverage_reason = "end_gap_exceeds_tolerance" if coverage_ok else "start_or_end_gap_exceeds_tolerance"
+
+    if rows <= 0:
+        coverage_ok = False
+        coverage_reason = "empty_dataset"
+
+    info_message = None
+    warning_message = None
+    if coverage_ok:
+        has_gaps = bool((start_gap_days or 0) > 0 or (end_gap_days or 0) > 0)
+        if has_gaps:
+            coverage_reason = "calendar_non_trading_days"
+            info_message = "Фактический период отличается от выбранного из-за отсутствия торгов в отдельные календарные дни"
+    else:
+        warning_message = "Данные покрывают выбранный период не полностью. Проверьте загрузку или кэш"
+
+    return {
+        "coverage_ok": bool(coverage_ok),
+        "start_gap_days": start_gap_days,
+        "end_gap_days": end_gap_days,
+        "coverage_reason": coverage_reason,
+        "info": info_message,
+        "warning": warning_message,
+    }
+
+
 def prepare_experimental_data(
     tickers: list[str],
     start_date: str,
@@ -345,10 +395,15 @@ def load_and_prepare_data(
         "tickers_loaded": load_info.get("tickers_loaded", []),
         "failed_tickers": load_info.get("failed_tickers", []),
     }
-    diagnostics["coverage_ok"] = bool(
-        diagnostics["analysis_period"]["start"] <= start_date and diagnostics["analysis_period"]["end"] >= end_date
+    coverage = _evaluate_period_coverage(
+        requested_start=start_date,
+        requested_end=end_date,
+        actual_start=diagnostics["analysis_period"]["start"],
+        actual_end=diagnostics["analysis_period"]["end"],
+        rows=diagnostics["rows"],
+        tolerance_days=10,
     )
-    diagnostics["warning"] = None if diagnostics["coverage_ok"] else "Период покрыт не полностью"
+    diagnostics.update(coverage)
 
     return processed, quality, diagnostics
 
@@ -537,10 +592,15 @@ def run_full_pipeline(
         "used_cache": bool(used_cache),
         "cache_valid": cache_valid,
     }
-    diagnostics["coverage_ok"] = bool(
-        (requested_start_date is None or diagnostics["analysis_period"]["start"] <= requested_start_date)
-        and (requested_end_date is None or diagnostics["analysis_period"]["end"] >= requested_end_date)
+    coverage = _evaluate_period_coverage(
+        requested_start=requested_start_date,
+        requested_end=requested_end_date,
+        actual_start=diagnostics["analysis_period"]["start"],
+        actual_end=diagnostics["analysis_period"]["end"],
+        rows=diagnostics["rows"],
+        tolerance_days=10,
     )
+    diagnostics.update(coverage)
 
     return {
         "best_pair": best_pair,
