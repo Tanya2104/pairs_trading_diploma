@@ -236,6 +236,8 @@ def run_full_pipeline(
     entry_z: float,
     exit_z: float,
     max_holding_days: int,
+    selected_pair: Optional[tuple[str, str]] = None,
+    selection_mode: str = "auto",
 ) -> Optional[Dict]:
     """Запускает поиск пары, генерацию сигналов и бэктест; возвращает словарь результатов."""
     tester = CointegrationTester(prices=prices, p_value_threshold=p_value_threshold)
@@ -244,47 +246,21 @@ def run_full_pipeline(
     coint_saved_files = tester.save_results()
     coint_heatmap_path = tester.save_pvalue_heatmap()
 
-    # 1) Статистический кандидат (как было раньше).
-    best_pair = tester.get_best_pair()
-    if best_pair is None:
+    if coint_results_df.empty:
         return None
 
-    # 2) Торговый кандидат: выбираем из tradable-пар ту,
-    #    у которой лучший Sharpe в "быстром" бэктесте на тех же параметрах.
-    tradable_pairs = [p for p in tester.results if tester._is_tradable_pair(p)]  # noqa: SLF001
-    best_pair_by_bt = None
-    best_pair_score = None
-
-    for candidate in tradable_pairs:
-        candidate_strategy = PairsTradingStrategy(
-            spread=candidate["spread"],
-            window=z_window,
-            entry_z=entry_z,
-            exit_z=exit_z,
-        )
-        candidate_signals = candidate_strategy.generate_signals(max_holding_days=max_holding_days)
-        candidate_returns = _build_pair_returns(prices=prices, best_pair=candidate)
-
-        candidate_bt = Backtest(
-            signals=candidate_signals,
-            spread=candidate["spread"],
-            pair_returns=candidate_returns,
-            initial_capital=1.0,
-        )
-        candidate_result = candidate_bt.run()
-        m = candidate_result["metrics"]
-
-        # Отбрасываем пары без сделок/сигналов.
-        if m["num_trades"] <= 0:
-            continue
-
-        score = (m["sharpe_ratio"], m["total_return"])
-        if best_pair_score is None or score > best_pair_score:
-            best_pair_score = score
-            best_pair_by_bt = candidate
-
-    if best_pair_by_bt is not None:
-        best_pair = best_pair_by_bt
+    best_pair = None
+    pair_source = "cointegration:min_p_value"
+    if selection_mode == "manual" and selected_pair is not None:
+        for candidate in tester.results:
+            if tuple(candidate["pair"]) == tuple(selected_pair):
+                best_pair = candidate
+                pair_source = "cointegration:manual_user_selection"
+                break
+    if best_pair is None:
+        cointegrated = [r for r in tester.results if r["is_cointegrated"]]
+        best_pair = cointegrated[0] if cointegrated else tester.results[0]
+        selection_mode = "auto"
 
     strategy = PairsTradingStrategy(
         spread=best_pair["spread"],
@@ -395,6 +371,21 @@ def run_full_pipeline(
                 **saved_spread_files,
                 "spread_plot_png": spread_plot_path,
                 "zscore_plot_png": zscore_plot_path,
+            },
+        },
+        "selection_context": {
+            "mode": selection_mode,
+            "source": pair_source,
+            "selected_pair": best_pair["pair"],
+            "sample_start": str(prices.index.min().date()),
+            "sample_end": str(prices.index.max().date()),
+            "sample_size": int(len(prices)),
+            "params": {
+                "p_value_threshold": float(p_value_threshold),
+                "z_window": int(z_window),
+                "entry_z": float(entry_z),
+                "exit_z": float(exit_z),
+                "max_holding_days": int(max_holding_days),
             },
         },
     }
