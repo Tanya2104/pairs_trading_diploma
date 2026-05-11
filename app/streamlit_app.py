@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+import json
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -146,6 +147,11 @@ def main() -> None:
             step=1,
         )
 
+        selection_mode = st.radio(
+            "Режим выбора пары",
+            options=["auto", "manual"],
+            format_func=lambda x: "Авто (min p-value)" if x == "auto" else "Ручной выбор",
+        )
         run_btn = st.button("Запустить анализ", type="primary")
 
     if not run_btn:
@@ -155,6 +161,24 @@ def main() -> None:
     if len(tickers) < 2:
         st.error("Выберите минимум 2 тикера.")
         return
+
+    run_signature = {
+        "tickers": tickers,
+        "start_date": str(start_date),
+        "end_date": str(end_date),
+        "missing_threshold": float(missing_threshold),
+        "use_cache": bool(use_cache),
+        "p_threshold": float(p_threshold),
+        "z_window": int(z_window),
+        "entry_z": float(entry_z),
+        "exit_z": float(exit_z),
+        "max_holding_days": int(max_holding_days),
+    }
+    signature_str = json.dumps(run_signature, sort_keys=True, ensure_ascii=False)
+    if st.session_state.get("analysis_signature") != signature_str:
+        st.session_state.pop("analysis_results", None)
+        st.session_state.pop("analysis_signature", None)
+        st.session_state.pop("manual_pair", None)
 
     with st.spinner("Загружаем данные и выполняем анализ..."):
         try:
@@ -179,6 +203,8 @@ def main() -> None:
                 exit_z=float(exit_z),
                 max_holding_days=int(max_holding_days),
             )
+            st.session_state["analysis_results"] = result
+            st.session_state["analysis_signature"] = signature_str
         except Exception as exc:
             st.exception(exc)
             return
@@ -224,6 +250,28 @@ def main() -> None:
         st.warning("Для выбранного периода/настроек коинтегрированные пары не найдены.")
         st.dataframe(prices.tail(15), use_container_width=True)
         return
+
+    coint_analysis = result.get("cointegration_analysis", {})
+    results_df = coint_analysis.get("results_df", pd.DataFrame())
+    pair_options = results_df["pair"].tolist() if not results_df.empty else []
+
+    selected_pair = None
+    if selection_mode == "manual":
+        default_pair = st.session_state.get("manual_pair", pair_options[0] if pair_options else None)
+        selected_pair_label = st.selectbox("Выберите пару вручную", options=pair_options, index=pair_options.index(default_pair) if default_pair in pair_options else 0)
+        st.session_state["manual_pair"] = selected_pair_label
+        left_ticker, right_ticker = selected_pair_label.split("-")
+        selected_pair = (left_ticker, right_ticker)
+        result = run_full_pipeline(
+            prices=prices,
+            p_value_threshold=p_threshold,
+            z_window=int(z_window),
+            entry_z=float(entry_z),
+            exit_z=float(exit_z),
+            max_holding_days=int(max_holding_days),
+            selected_pair=selected_pair,
+            selection_mode="manual",
+        )
 
     best_pair = result["best_pair"]
     signals = result["signals"]
@@ -274,7 +322,7 @@ def main() -> None:
     k1.metric("Проверено пар", total_pairs)
     k2.metric("Коинтегрированных пар", coint_pairs_count)
     if not results_df.empty:
-        k3.metric("Лучшая пара (min p-value)", results_df.iloc[0]["pair"])
+        k3.metric("Режим выбора", "manual" if selection_mode == "manual" else "auto")
 
     st.markdown("**Полная таблица результатов (сортировка по p-value):**")
     st.dataframe(results_df, use_container_width=True)
@@ -332,6 +380,16 @@ def main() -> None:
         f"**{best_pair['pair'][0]} - {best_pair['pair'][1]}**  \\\n"
         f"p-value: `{best_pair['p_value']:.6f}`, бета: `{best_pair['beta']:.4f}`, "
         f"R^2: `{best_pair['r_squared']:.4f}`, half-life: `{best_pair['half_life']:.1f}`"
+    )
+    debug_ctx = result.get("selection_context", {})
+    st.caption(
+        "DEBUG selection: "
+        f"mode={debug_ctx.get('mode')}, "
+        f"pair={debug_ctx.get('selected_pair')}, "
+        f"source={debug_ctx.get('source')}, "
+        f"p_value={best_pair['p_value']:.6f}, beta={best_pair['beta']:.4f}, "
+        f"sample={debug_ctx.get('sample_start')}..{debug_ctx.get('sample_end')} (n={debug_ctx.get('sample_size')}), "
+        f"params={debug_ctx.get('params')}"
     )
 
     left, right = st.columns(2)
