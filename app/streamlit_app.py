@@ -237,9 +237,35 @@ def main() -> None:
         st.caption("Корреляция отражает совместное движение; коинтеграция подтверждает долгосрочное равновесие. Высокая корреляция без коинтеграции может давать ложные сигналы.")
         st.info(build_method_comparison_text(metrics, corr_bt.get("metrics", {})))
         cmp = go.Figure()
-        cmp.add_trace(go.Scatter(x=result["equity"].index, y=result["equity"].values, name="Коинтеграция"))
-        cmp.add_trace(go.Scatter(x=corr_bt["equity"].index, y=corr_bt["equity"].values, name="Корреляция"))
-        cmp.update_layout(title="Сравнение результатов при выбранных параметрах", xaxis_title="Дата", yaxis_title="Индекс капитала")
+        cmp.add_trace(
+            go.Scatter(
+                x=result["equity"].index,
+                y=result["equity"].values,
+                name="Коинтеграция (сплошная)",
+                mode="lines",
+                line={"color": "#222222", "width": 2.6, "dash": "solid"},
+            )
+        )
+        cmp.add_trace(
+            go.Scatter(
+                x=corr_bt["equity"].index,
+                y=corr_bt["equity"].values,
+                name="Корреляция (штриховая)",
+                mode="lines",
+                line={"color": "#555555", "width": 2.0, "dash": "dash"},
+            )
+        )
+        cmp.update_layout(
+            title="Сравнение результатов при выбранных параметрах",
+            xaxis_title="Дата",
+            yaxis_title="Индекс капитала",
+            template="plotly_white",
+            plot_bgcolor="white",
+            paper_bgcolor="white",
+            legend={"title": {"text": "Метод (тип линии)"}},
+        )
+        cmp.update_xaxes(showgrid=True, gridcolor="#E5E5E5", gridwidth=0.6)
+        cmp.update_yaxes(showgrid=True, gridcolor="#E5E5E5", gridwidth=0.6)
         st.plotly_chart(cmp, use_container_width=True)
 
 
