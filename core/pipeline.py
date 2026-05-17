@@ -279,18 +279,18 @@ def _run_strategy_backtest_for_pair(
     prices: pd.DataFrame,
     pair: tuple[str, str],
     beta: float,
-    spread: pd.Series,
+    spread_raw: pd.Series,
     z_window: int,
     entry_z: float,
     exit_z: float,
     max_holding_days: int,
 ) -> Dict:
     """Единый пайплайн стратегия → сигналы → сделки → бэктест для выбранной пары."""
-    strategy = PairsTradingStrategy(spread=spread, window=z_window, entry_z=entry_z, exit_z=exit_z)
+    strategy = PairsTradingStrategy(spread=spread_raw, window=z_window, entry_z=entry_z, exit_z=exit_z)
     signals = strategy.generate_signals(max_holding_days=max_holding_days)
     trades = strategy.get_trades()
     pair_returns = _build_pair_returns(prices=prices, best_pair={"pair": pair, "beta": beta})
-    backtest = Backtest(signals=signals, spread=spread, pair_returns=pair_returns, initial_capital=1.0)
+    backtest = Backtest(signals=signals, spread=spread_raw, pair_returns=pair_returns, initial_capital=1.0)
     raw_backtest = backtest.run()
     equity_curve = raw_backtest.get("cumulative_returns")
     if equity_curve is None:
@@ -317,6 +317,11 @@ def _run_strategy_backtest_for_pair(
         "backtest_result": backtest_result,
         "details": details,
     }
+
+
+def _build_spread_raw(prices: pd.DataFrame, pair: tuple[str, str], beta: float) -> pd.Series:
+    ticker_1, ticker_2 = pair
+    return calculate_spread(prices[ticker_1], prices[ticker_2], beta)
 
 
 def _save_correlation_heatmap(corr_matrix: pd.DataFrame, output_path: str = "data/results/heatmap_correlation.png") -> str:
@@ -480,11 +485,12 @@ def run_full_pipeline(
             return None
         selection_mode = "auto"
 
+    spread_raw = _build_spread_raw(prices=prices, pair=best_pair["pair"], beta=float(best_pair["beta"]))
     coint_bt = _run_strategy_backtest_for_pair(
         prices=prices,
         pair=best_pair["pair"],
         beta=float(best_pair["beta"]),
-        spread=best_pair["spread"],
+        spread_raw=spread_raw,
         z_window=z_window,
         entry_z=entry_z,
         exit_z=exit_z,
@@ -506,7 +512,7 @@ def run_full_pipeline(
     # Анализ динамики спреда (раздел 3.3)
     ticker_1, ticker_2 = best_pair["pair"]
     beta = float(best_pair["beta"])
-    spread = calculate_spread(prices[ticker_1], prices[ticker_2], beta)
+    spread = spread_raw
     pair_label = f"{ticker_1} - {ticker_2}"
     spread_df = calculate_zscore(spread=spread, window=z_window)
     spread_stats = spread_statistics(spread)
@@ -538,7 +544,7 @@ def run_full_pipeline(
             prices=prices,
             pair=corr_pair["pair"],
             beta=float(corr_pair["beta"]),
-            spread=corr_pair["spread"],
+            spread_raw=_build_spread_raw(prices=prices, pair=corr_pair["pair"], beta=float(corr_pair["beta"])),
             z_window=z_window,
             entry_z=entry_z,
             exit_z=exit_z,
@@ -602,6 +608,13 @@ def run_full_pipeline(
     )
     diagnostics.update(coverage)
 
+    comparison_table = pd.DataFrame(tester.get_comparison_table())
+    if not comparison_table.empty:
+        comparison_table = comparison_table.rename(columns={"cointegrated": "is_cointegrated"})
+        comparison_table["status"] = comparison_table["is_cointegrated"].map(
+            lambda v: "Коинтегрирована" if bool(v) else "Высокая корреляция без коинтеграции"
+        )
+
     return {
         "best_pair": best_pair,
         "signals": signals,
@@ -611,7 +624,7 @@ def run_full_pipeline(
         "backtest_result": coint_backtest_result,
         "details": coint_details,
         "correlation_backtest": correlation_backtest,
-        "comparison_table": tester.get_comparison_table(),
+        "comparison_table": comparison_table,
         "best_method": best_method,
         "comparison_reason": comparison_reason,
         "comparison_section": {
