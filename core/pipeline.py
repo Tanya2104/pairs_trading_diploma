@@ -243,8 +243,17 @@ def _get_top_correlation_pair(prices: pd.DataFrame, coint_results: Optional[list
 
     ranked.sort(key=lambda x: x[0], reverse=True)
     selected = None
+
+    # Для воспроизводимого сравнения в дипломной витрине приоритетно используем SBER-NVTK
+    # как высококоррелированную, но некоинтегрированную пару (если она есть в выборке).
+    preferred_pair = ("SBER", "NVTK")
     for _, corr, pair, p_val in ranked:
-        if p_val >= p_threshold:
+        if pair == preferred_pair and p_val >= p_threshold:
+            selected = (corr, pair)
+            break
+
+    for _, corr, pair, p_val in ranked:
+        if selected is None and p_val >= p_threshold:
             selected = (corr, pair)
             break
     if selected is None and ranked:

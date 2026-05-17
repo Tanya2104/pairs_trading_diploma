@@ -64,6 +64,21 @@ def build_method_comparison_text(coint_metrics: dict, corr_metrics: dict | None)
     return base
 
 
+def _equity_diagnostics_line(name: str, equity: pd.Series) -> str:
+    if equity is None or len(equity) == 0:
+        return f"{name}: EMPTY"
+    start_date = pd.to_datetime(equity.index.min()).date()
+    end_date = pd.to_datetime(equity.index.max()).date()
+    first_val = float(equity.iloc[0])
+    last_val = float(equity.iloc[-1])
+    total_return = (last_val / first_val - 1.0) if first_val != 0 else float("nan")
+    return (
+        f"{name}: {start_date} -> {end_date}; "
+        f"first={first_val:.6f}, last={last_val:.6f}, "
+        f"return={total_return:.2%}, points={len(equity)}"
+    )
+
+
 def main() -> None:
     st.set_page_config(page_title="Парный трейдинг MOEX", layout="wide")
     st.title("Экспериментальная глава: парный трейдинг MOEX")
@@ -232,15 +247,31 @@ def main() -> None:
     if corr_bt is None:
         st.info("Корреляционный бенчмарк недоступен.")
     else:
+        coint_equity = result.get("backtest_result", {}).get("equity_curve", result["equity"])
+        corr_equity = corr_bt.get("backtest_result", {}).get("equity_curve", corr_bt.get("equity"))
+
         st.markdown("**Высококоррелированная пара без коинтеграции**")
         st.write(f"{corr_bt['pair']['pair'][0]} - {corr_bt['pair']['pair'][1]}")
         st.caption("Корреляция отражает совместное движение; коинтеграция подтверждает долгосрочное равновесие. Высокая корреляция без коинтеграции может давать ложные сигналы.")
         st.info(build_method_comparison_text(metrics, corr_bt.get("metrics", {})))
+        st.markdown("**Диагностика кривых капитала перед построением графика**")
+        analysis_period = result.get("diagnostics", {}).get("analysis_period", {})
+        st.code(
+            "\n".join(
+                [
+                    f"Cointegration pair: {best_pair['pair'][0]}-{best_pair['pair'][1]}",
+                    f"Correlation pair: {corr_bt['pair']['pair'][0]}-{corr_bt['pair']['pair'][1]}",
+                    f"Analysis period: {analysis_period.get('start')} -> {analysis_period.get('end')}",
+                    _equity_diagnostics_line("Cointegration", coint_equity),
+                    _equity_diagnostics_line("Correlation", corr_equity),
+                ]
+            )
+        )
         cmp = go.Figure()
         cmp.add_trace(
             go.Scatter(
-                x=result["equity"].index,
-                y=result["equity"].values,
+                x=coint_equity.index,
+                y=coint_equity.values,
                 name="Коинтеграционная стратегия (сплошная)",
                 mode="lines",
                 line={"color": "#222222", "width": 2.6, "dash": "solid"},
@@ -248,8 +279,8 @@ def main() -> None:
         )
         cmp.add_trace(
             go.Scatter(
-                x=corr_bt["equity"].index,
-                y=corr_bt["equity"].values,
+                x=corr_equity.index,
+                y=corr_equity.values,
                 name="Корреляционная стратегия (пунктирная)",
                 mode="lines",
                 line={"color": "#555555", "width": 2.0, "dash": "dash"},
