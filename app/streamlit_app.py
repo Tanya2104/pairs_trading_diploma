@@ -241,7 +241,8 @@ def main() -> None:
             go.Scatter(
                 x=result["equity"].index,
                 y=result["equity"].values,
-
+                name="Коинтеграция (сплошная)",
+                line=dict(color="#333333", dash="solid"),
                 name="Коинтеграция (сплошная)",
                 line=dict(color="#333333", dash="solid"),
 
@@ -260,6 +261,7 @@ def main() -> None:
                 line=dict(color="#333333", dash="dash"),
             )
         )
+
         cmp.update_layout(title="Сравнение результатов при выбранных параметрах", xaxis_title="Дата", yaxis_title="Индекс капитала")
 
                 name="Корреляционная стратегия (пунктирная)",
@@ -267,10 +269,13 @@ def main() -> None:
                 line={"color": "#555555", "width": 2.0, "dash": "dash"},
             )
         )
+
         cmp.update_layout(
             title="Сравнение результатов при выбранных параметрах",
             xaxis_title="Дата",
             yaxis_title="Индекс капитала",
+
+        )
             template="plotly_white",
             plot_bgcolor="white",
             paper_bgcolor="white",
@@ -278,7 +283,6 @@ def main() -> None:
         )
         cmp.update_xaxes(showgrid=True, gridcolor="#E5E5E5", gridwidth=0.6)
         cmp.update_yaxes(showgrid=True, gridcolor="#E5E5E5", gridwidth=0.6)
-
         st.plotly_chart(cmp, use_container_width=True)
 
 
