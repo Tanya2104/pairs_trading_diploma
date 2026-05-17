@@ -55,8 +55,12 @@ def build_method_comparison_text(coint_metrics: dict, corr_metrics: dict | None)
     base = f"Сравнение результатов при выбранных параметрах: Sharpe {c_sh:.2f} vs {r_sh:.2f}; доходность {c_ret:.2%} vs {r_ret:.2%}."
     if c_ret > 0 or r_ret > 0:
         if c_ret >= r_ret:
-            return f"{base} Лидирует: Коинтеграция."
-        return f"{base} На выбранном периоде корреляционный подход показал лучший результат, однако наличие ложных корреляций подтверждает ограниченность метода."
+            return f"{base} Пара по коинтеграции статистически подтверждает долгосрочное равновесие."
+        return (
+            f"{base} На данном периоде корреляционный подход показал более высокую доходность, "
+            "однако выбранная пара не имеет подтверждённой коинтеграционной зависимости, "
+            "поэтому результат менее устойчив с точки зрения статистического обоснования."
+        )
     return base
 
 
@@ -185,6 +189,9 @@ def main() -> None:
 
     st.subheader("3.2 Анализ коинтеграционных зависимостей")
     st.dataframe(results_df, use_container_width=True)
+    coint_count = int(results_df["cointegrated"].sum()) if "cointegrated" in results_df.columns else 0
+    if coint_count == 1:
+        st.info("На выбранном периоде только одна пара прошла критерий p-value < 0.05.")
     st.markdown(f"Выбрана пара: **{best_pair['pair'][0]} - {best_pair['pair'][1]}** (p-value={best_pair['p_value']:.6f}, beta={best_pair['beta']:.4f}, R²={best_pair['r_squared']:.4f}, half-life={best_pair['half_life']:.1f}).")
 
     coint_heatmap_path = result["cointegration_analysis"].get("heatmap_path")
@@ -213,15 +220,44 @@ def main() -> None:
     c3.metric("Макс. просадка", f"{metrics['max_drawdown']:.2%}")
     st.plotly_chart(render_equity_chart(result["equity"]), use_container_width=True)
 
-    st.subheader("3.6 Сравнение методов: коинтеграция и корреляция")
+    st.subheader("3.6 Сравнение результатов при выбранных параметрах")
+    st.markdown("**Пара, выбранная по коинтеграции**")
+    st.write(f"{best_pair['pair'][0]} - {best_pair['pair'][1]}")
+    cmp_table = result.get("comparison_table")
+    if isinstance(cmp_table, pd.DataFrame) and not cmp_table.empty:
+        cols = ["pair", "correlation", "p_value_coint", "is_cointegrated", "status"]
+        present_cols = [c for c in cols if c in cmp_table.columns]
+        st.dataframe(cmp_table[present_cols], use_container_width=True)
+
     if corr_bt is None:
         st.info("Корреляционный бенчмарк недоступен.")
     else:
+        st.markdown("**Высококоррелированная пара без коинтеграции**")
+        st.write(f"{corr_bt['pair']['pair'][0]} - {corr_bt['pair']['pair'][1]}")
+        st.caption("Корреляция отражает совместное движение; коинтеграция подтверждает долгосрочное равновесие. Высокая корреляция без коинтеграции может давать ложные сигналы.")
         st.info(build_method_comparison_text(metrics, corr_bt.get("metrics", {})))
         cmp = go.Figure()
-        cmp.add_trace(go.Scatter(x=result["equity"].index, y=result["equity"].values, name="Коинтеграция"))
-        cmp.add_trace(go.Scatter(x=corr_bt["equity"].index, y=corr_bt["equity"].values, name="Корреляция"))
-        cmp.update_layout(title="Сравнение результатов при выбранных параметрах", xaxis_title="Дата", yaxis_title="Индекс капитала")
+        cmp.add_trace(
+            go.Scatter(
+                x=result["equity"].index,
+                y=result["equity"].values,
+                name="Коинтеграция (сплошная)",
+                line=dict(color="#333333", dash="solid"),
+            )
+        )
+        cmp.add_trace(
+            go.Scatter(
+                x=corr_bt["equity"].index,
+                y=corr_bt["equity"].values,
+                name="Корреляция (пунктир)",
+                line=dict(color="#333333", dash="dash"),
+            )
+        )
+        cmp.update_layout(
+            title="Сравнение результатов при выбранных параметрах",
+            xaxis_title="Дата",
+            yaxis_title="Индекс капитала",
+        )
         st.plotly_chart(cmp, use_container_width=True)
 
 
